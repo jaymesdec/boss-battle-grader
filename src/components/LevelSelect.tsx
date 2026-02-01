@@ -185,12 +185,21 @@ export function LevelSelect({
                     {assignment.name}
                   </h3>
 
-                  {/* Status and meta */}
+                  {/* Grading progress */}
                   <div className="flex items-center gap-4 text-sm mb-3">
-                    <span className={`flex items-center gap-1 ${statusConfig.color}`}>
-                      <span>{statusConfig.icon}</span>
-                      <span className="font-display">{statusConfig.label}</span>
-                    </span>
+                    {status === 'no_submissions' ? (
+                      <span className={`flex items-center gap-1 ${statusConfig.color}`}>
+                        <span>{statusConfig.icon}</span>
+                        <span className="font-display">{statusConfig.label}</span>
+                      </span>
+                    ) : (
+                      <span className={`flex items-center gap-1 ${statusConfig.color}`}>
+                        <span>{statusConfig.icon}</span>
+                        <span className="font-display">
+                          {gradedCount}/{totalCount} GRADED
+                        </span>
+                      </span>
+                    )}
                   </div>
 
                   {/* Stats row */}
@@ -203,12 +212,6 @@ export function LevelSelect({
                       <span className="flex items-center gap-1">
                         <span>📅</span>
                         <span>{new Date(assignment.due_at).toLocaleDateString()}</span>
-                      </span>
-                    )}
-                    {totalCount > 0 && (
-                      <span className="flex items-center gap-1">
-                        <span>📝</span>
-                        <span>{gradedCount}/{totalCount} graded</span>
                       </span>
                     )}
                   </div>
