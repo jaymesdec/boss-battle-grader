@@ -38,10 +38,28 @@ export async function GET(
 
     const submissions = await response.json();
 
+    // Test student names to exclude
+    const TEST_STUDENT_PATTERNS = [
+      'Test Student',
+      'J-DEC Test Child',
+      'DEC Test',
+    ];
+
     // Filter to only include submissions that have been submitted
+    // and exclude test students
     const submittedSubmissions = submissions.filter(
-      (sub: { workflow_state: string; submitted_at: string | null }) =>
-        sub.workflow_state !== 'unsubmitted' && sub.submitted_at !== null
+      (sub: { workflow_state: string; submitted_at: string | null; user?: { name: string } }) => {
+        // Must be submitted
+        if (sub.workflow_state === 'unsubmitted' || sub.submitted_at === null) {
+          return false;
+        }
+        // Exclude test students
+        const userName = sub.user?.name || '';
+        if (TEST_STUDENT_PATTERNS.some(pattern => userName.includes(pattern))) {
+          return false;
+        }
+        return true;
+      }
     );
 
     return NextResponse.json(submittedSubmissions);
