@@ -336,3 +336,37 @@ export interface PointsBreakdown {
   multiplier: number;
   total: number;
 }
+
+// -----------------------------------------------------------------------------
+// Batch Upload Types
+// -----------------------------------------------------------------------------
+
+export interface BatchAttachment {
+  extractedText: string | null;
+  pdfImages: string[]; // Base64 image data URLs
+  filename: string;
+  teacherNotes?: string;
+}
+
+export interface BatchFileInfo {
+  id: string;
+  file: File;
+  filename: string;
+  extractedText: string | null;
+  pdfImages: string[];
+  isProcessing: boolean;
+  error: string | null;
+}
+
+export interface StudentMatch {
+  fileId: string;
+  filename: string;
+  matchedStudentId: number | null;
+  matchedStudentName: string | null;
+  confidence: number;
+  alternatives: Array<{
+    id: number;
+    name: string;
+    score: number;
+  }>;
+}

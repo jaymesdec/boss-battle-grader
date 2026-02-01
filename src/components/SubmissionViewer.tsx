@@ -4,9 +4,9 @@
 // SubmissionViewer - Display student submission content with tabs
 // =============================================================================
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
-import type { CanvasSubmission } from '@/types';
+import type { CanvasSubmission, BatchAttachment } from '@/types';
 
 // Type for PDF images formatted for Claude's vision API
 export type PDFImageForAI = ReturnType<typeof getPDFImagesForAI>[number];
@@ -16,6 +16,7 @@ interface SubmissionViewerProps {
   isLoading?: boolean;
   onContentParsed?: (content: string) => void;
   onPDFPagesLoaded?: (pages: PDFPage[], aiImages: PDFImageForAI[]) => void;
+  batchAttachment?: BatchAttachment | null;
 }
 
 export function SubmissionViewer({
@@ -23,16 +24,23 @@ export function SubmissionViewer({
   isLoading = false,
   onContentParsed,
   onPDFPagesLoaded,
+  batchAttachment,
 }: SubmissionViewerProps) {
   const [activeTab, setActiveTab] = useState(0);
   const [parsedContent, setParsedContent] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+  const [batchImageIndex, setBatchImageIndex] = useState(0);
 
   // Handle PDF pages loaded - convert to AI format and notify parent
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[]) => {
     const aiImages = getPDFImagesForAI(pages);
     onPDFPagesLoaded?.(pages, aiImages);
   }, [onPDFPagesLoaded]);
+
+  // Reset batch image index when batch attachment changes
+  useEffect(() => {
+    setBatchImageIndex(0);
+  }, [batchAttachment]);
 
   if (isLoading) {
     return (
@@ -54,6 +62,101 @@ export function SubmissionViewer({
         <span className="text-6xl mb-4">📄</span>
         <p className="text-lg font-display">No Submission Selected</p>
         <p className="text-sm mt-2">Select a student to view their work</p>
+      </div>
+    );
+  }
+
+  // If there's a batch attachment, show it instead of regular submission
+  if (batchAttachment) {
+    return (
+      <div className="h-full flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-3 border-b border-surface">
+          <div className="flex items-center gap-2">
+            <span className="text-accent-primary">📦</span>
+            <span className="font-display text-sm text-text-primary">
+              BATCH UPLOAD
+            </span>
+            <span className="px-2 py-0.5 bg-accent-secondary/20 text-accent-secondary text-xs rounded">
+              {batchAttachment.pdfImages.length} pages
+            </span>
+          </div>
+          <div className="text-xs text-text-muted">
+            {batchAttachment.filename}
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <div className="flex items-center justify-between p-2 border-b border-surface bg-surface/30">
+          <button
+            onClick={() => setBatchImageIndex((i) => Math.max(0, i - 1))}
+            disabled={batchImageIndex === 0}
+            className={`p-2 rounded-lg transition-all ${
+              batchImageIndex === 0
+                ? 'text-text-muted cursor-not-allowed'
+                : 'text-text-primary hover:bg-surface'
+            }`}
+          >
+            ◀
+          </button>
+          <span className="font-display text-sm text-text-primary">
+            SLIDE {batchImageIndex + 1} of {batchAttachment.pdfImages.length}
+          </span>
+          <button
+            onClick={() =>
+              setBatchImageIndex((i) =>
+                Math.min(batchAttachment.pdfImages.length - 1, i + 1)
+              )
+            }
+            disabled={batchImageIndex === batchAttachment.pdfImages.length - 1}
+            className={`p-2 rounded-lg transition-all ${
+              batchImageIndex === batchAttachment.pdfImages.length - 1
+                ? 'text-text-muted cursor-not-allowed'
+                : 'text-text-primary hover:bg-surface'
+            }`}
+          >
+            ▶
+          </button>
+        </div>
+
+        {/* Image Display */}
+        <div className="flex-1 flex items-center justify-center p-4 overflow-auto bg-background/50">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={batchAttachment.pdfImages[batchImageIndex]}
+            alt={`Page ${batchImageIndex + 1}`}
+            className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+          />
+        </div>
+
+        {/* Thumbnails */}
+        <div className="flex gap-2 p-2 border-t border-surface overflow-x-auto bg-surface/20">
+          {batchAttachment.pdfImages.map((img, i) => (
+            <button
+              key={i}
+              onClick={() => setBatchImageIndex(i)}
+              className={`flex-shrink-0 rounded-lg overflow-hidden transition-all ${
+                batchImageIndex === i
+                  ? 'ring-2 ring-accent-primary'
+                  : 'opacity-60 hover:opacity-100'
+              }`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={img}
+                alt={`Thumbnail ${i + 1}`}
+                className="h-16 w-auto object-contain bg-white"
+              />
+            </button>
+          ))}
+        </div>
+
+        {/* AI Note */}
+        <div className="p-2 bg-surface/30 border-t border-surface">
+          <p className="text-xs text-text-muted text-center">
+            📸 AI can see all {batchAttachment.pdfImages.length} slides when generating feedback
+          </p>
+        </div>
       </div>
     );
   }

@@ -10,6 +10,7 @@ import { StudentQueue } from './StudentQueue';
 import { CharacterCard } from './CharacterCard';
 import { SubmissionViewer, type PDFImageForAI } from './SubmissionViewer';
 import type { PDFPage } from './PDFViewer';
+import { BatchUploadModal } from './BatchUploadModal';
 import { FeedbackComposer } from './FeedbackComposer';
 import { CompetencyScorer } from './CompetencyScorer';
 import {
@@ -25,6 +26,7 @@ import type {
   Grade,
   FeedbackInput,
   CanvasRubric,
+  BatchAttachment,
 } from '@/types';
 
 interface RubricScore {
@@ -86,6 +88,10 @@ export function BattleScreen({
   // PDF images for AI vision analysis
   const [pdfImages, setPdfImages] = useState<PDFImageForAI[]>([]);
 
+  // Batch upload state
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [batchAttachments, setBatchAttachments] = useState<Map<number, BatchAttachment>>(new Map());
+
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
   const studentName = currentSubmission?.user?.name || `Student ${currentSubmission?.user_id || 0}`;
@@ -114,7 +120,23 @@ export function BattleScreen({
     setCurrentFeedback({ text: '', voiceDurationSeconds: 0 });
     setParsedContent('');
     setPdfImages([]);
-  }, []);
+
+    // Check for batch attachment for this student
+    const batchAttachment = batchAttachments.get(userId);
+    if (batchAttachment) {
+      // Convert data URLs to AI format
+      const aiImages: PDFImageForAI[] = batchAttachment.pdfImages.map((dataUrl) => ({
+        type: 'image' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: 'image/jpeg' as const,
+          data: dataUrl.replace(/^data:image\/jpeg;base64,/, ''),
+        },
+      }));
+      setPdfImages(aiImages);
+      setParsedContent(`[Batch upload: ${batchAttachment.filename} with ${batchAttachment.pdfImages.length} pages]`);
+    }
+  }, [batchAttachments]);
 
   // Handle PDF pages loaded - store for AI vision
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[], aiImages: PDFImageForAI[]) => {
@@ -123,6 +145,30 @@ export function BattleScreen({
     const pagesSummary = `[PDF with ${pages.length} slides loaded for AI vision analysis]`;
     setParsedContent(pagesSummary);
   }, []);
+
+  // Handle batch attachments received from modal
+  const handleBatchAttachments = useCallback((attachments: Map<number, BatchAttachment>) => {
+    setBatchAttachments(attachments);
+
+    // If current student has a batch attachment, load it
+    if (currentUserId && attachments.has(currentUserId)) {
+      const attachment = attachments.get(currentUserId)!;
+      // Convert data URLs to AI format
+      const aiImages: PDFImageForAI[] = attachment.pdfImages.map((dataUrl) => ({
+        type: 'image' as const,
+        source: {
+          type: 'base64' as const,
+          media_type: 'image/jpeg' as const,
+          data: dataUrl.replace(/^data:image\/jpeg;base64,/, ''),
+        },
+      }));
+      setPdfImages(aiImages);
+      setParsedContent(`[Batch upload: ${attachment.filename} with ${attachment.pdfImages.length} pages]`);
+    }
+  }, [currentUserId]);
+
+  // Get current batch attachment if available
+  const currentBatchAttachment = currentUserId ? batchAttachments.get(currentUserId) : null;
 
   // Handle grade change
   const handleGradeChange = useCallback((competencyId: CompetencyId, grade: Grade | null) => {
@@ -325,6 +371,21 @@ export function BattleScreen({
 
           {/* Student Queue */}
           <div className="flex-1 overflow-y-auto">
+            {/* Batch Upload Button */}
+            <div className="p-2 border-b border-surface">
+              <button
+                onClick={() => setIsBatchModalOpen(true)}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-surface/50 hover:bg-surface rounded-lg text-text-muted hover:text-text-primary transition-colors text-sm"
+              >
+                <span>📦</span>
+                <span>Batch Upload PDFs</span>
+                {batchAttachments.size > 0 && (
+                  <span className="px-1.5 py-0.5 bg-accent-primary/20 text-accent-primary text-xs rounded">
+                    {batchAttachments.size}
+                  </span>
+                )}
+              </button>
+            </div>
             <StudentQueue
               submissions={submissions}
               currentUserId={currentUserId}
@@ -343,6 +404,7 @@ export function BattleScreen({
               isLoading={isLoading}
               onContentParsed={handleContentParsed}
               onPDFPagesLoaded={handlePDFPagesLoaded}
+              batchAttachment={currentBatchAttachment}
             />
           </div>
 
@@ -376,6 +438,14 @@ export function BattleScreen({
           />
         </div>
       </div>
+
+      {/* Batch Upload Modal */}
+      <BatchUploadModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        submissions={submissions}
+        onAttachToSubmissions={handleBatchAttachments}
+      />
     </div>
   );
 }
