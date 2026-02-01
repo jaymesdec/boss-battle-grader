@@ -17,9 +17,9 @@ export async function GET(
   }
 
   try {
-    // Fetch assignments with submission summary
+    // Fetch assignments with submission summary and needs_grading_count
     const response = await fetch(
-      `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments?per_page=50&include[]=submission_summary`,
+      `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments?per_page=50&include[]=submission_summary&include[]=needs_grading_count`,
       {
         headers: {
           Authorization: `Bearer ${CANVAS_API_TOKEN}`,

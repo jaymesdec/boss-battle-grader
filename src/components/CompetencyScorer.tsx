@@ -16,6 +16,7 @@ interface RubricScore {
   criterionId: string;
   ratingId: string;
   points: number;
+  comments: string;
 }
 
 interface CompetencyScorerProps {
@@ -174,12 +175,12 @@ export function CompetencyScorer({
           {isPosting ? (
             <>
               <span className="animate-spin">⏳</span>
-              <span>POSTING...</span>
+              <span>SAVING...</span>
             </>
           ) : (
             <>
-              <span>📤</span>
-              <span>POST TO CANVAS</span>
+              <span>💾</span>
+              <span>SAVE TO CANVAS</span>
             </>
           )}
         </button>
@@ -298,6 +299,12 @@ function RubricCriterionItem({
     ? criterion.ratings.find((r) => r.id === score.ratingId)
     : null;
 
+  const handleCommentsChange = (comments: string) => {
+    if (score) {
+      onScoreChange(criterion.id, { ...score, comments });
+    }
+  };
+
   return (
     <div
       className={`
@@ -328,44 +335,66 @@ function RubricCriterionItem({
               {criterion.long_description}
             </p>
           )}
-          {criterion.ratings.map((rating) => {
-            const isSelected = score?.ratingId === rating.id;
-            return (
-              <button
-                key={rating.id}
-                onClick={() => {
-                  if (isSelected) {
-                    onScoreChange(criterion.id, null);
-                  } else {
-                    onScoreChange(criterion.id, {
-                      criterionId: criterion.id,
-                      ratingId: rating.id,
-                      points: rating.points,
-                    });
-                  }
-                }}
-                className={`
-                  w-full p-2 rounded text-left transition-all
-                  ${isSelected
-                    ? 'bg-accent-primary/20 border border-accent-primary'
-                    : 'bg-surface hover:bg-surface/80 border border-transparent'
-                  }
-                `}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-display text-text-primary">
-                    {rating.description}
-                  </span>
-                  <span className={`text-sm font-display ${isSelected ? 'text-accent-primary' : 'text-text-muted'}`}>
-                    {rating.points} pts
-                  </span>
-                </div>
-                {rating.long_description && (
-                  <p className="text-xs text-text-muted">{rating.long_description}</p>
-                )}
-              </button>
-            );
-          })}
+          <div className="flex flex-wrap gap-1">
+            {criterion.ratings.map((rating) => {
+              const isSelected = score?.ratingId === rating.id;
+              return (
+                <button
+                  key={rating.id}
+                  onClick={() => {
+                    if (isSelected) {
+                      onScoreChange(criterion.id, null);
+                    } else {
+                      onScoreChange(criterion.id, {
+                        criterionId: criterion.id,
+                        ratingId: rating.id,
+                        points: rating.points,
+                        comments: score?.comments || '',
+                      });
+                    }
+                  }}
+                  title={rating.long_description || rating.description}
+                  className={`
+                    px-2 py-1.5 rounded text-xs font-display transition-all
+                    ${isSelected
+                      ? 'bg-accent-primary text-background'
+                      : 'bg-surface hover:bg-surface/80 text-text-primary'
+                    }
+                  `}
+                >
+                  {rating.points}
+                </button>
+              );
+            })}
+          </div>
+          {/* Show selected rating description */}
+          {score && (
+            <p className="text-xs text-text-muted mt-1 px-1">
+              <span className="font-display text-text-primary">
+                {criterion.ratings.find(r => r.id === score.ratingId)?.description}:
+              </span>{' '}
+              {criterion.ratings.find(r => r.id === score.ratingId)?.long_description}
+            </p>
+          )}
+
+          {/* Per-criterion feedback */}
+          <div className="mt-2 pt-2 border-t border-surface/50">
+            <label className="text-xs text-text-muted mb-1 block">Feedback</label>
+            <textarea
+              value={score?.comments || ''}
+              onChange={(e) => handleCommentsChange(e.target.value)}
+              disabled={!score}
+              placeholder={score ? 'Add feedback for this criterion...' : 'Select a rating first'}
+              className={`
+                w-full p-2 rounded text-sm resize-none transition-colors
+                ${score
+                  ? 'bg-background/50 border border-surface text-text-primary placeholder-text-muted focus:outline-none focus:border-accent-primary'
+                  : 'bg-surface/30 border border-transparent text-text-muted cursor-not-allowed'
+                }
+              `}
+              rows={3}
+            />
+          </div>
         </div>
       )}
     </div>

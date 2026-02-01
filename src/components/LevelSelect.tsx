@@ -23,13 +23,19 @@ function getDungeonStatus(assignment: CanvasAssignment): DungeonStatus {
   const summary = assignment.submission_summary;
   if (!summary) return 'ungraded';
 
-  if (summary.ungraded === 0 && summary.graded === 0 && summary.not_submitted > 0) {
+  const totalSubmitted = (summary.graded || 0) + (summary.ungraded || 0);
+
+  if (totalSubmitted === 0 && summary.not_submitted > 0) {
     return 'no_submissions';
   }
-  if (summary.ungraded === 0 && summary.graded > 0) {
+
+  // Use needs_grading_count for accurate status
+  const needsGrading = assignment.needs_grading_count ?? summary.ungraded ?? 0;
+
+  if (needsGrading === 0 && totalSubmitted > 0) {
     return 'cleared';
   }
-  if (summary.graded > 0 && summary.ungraded > 0) {
+  if (needsGrading < totalSubmitted && needsGrading > 0) {
     return 'in_progress';
   }
   return 'ungraded';
@@ -50,11 +56,7 @@ export function LevelSelect({
   onSelectAssignment,
   onBack,
 }: LevelSelectProps) {
-  // Calculate overall progress
-  const totalGraded = assignments.reduce(
-    (sum, a) => sum + (a.submission_summary?.graded || 0),
-    0
-  );
+  // Calculate overall progress using needs_grading_count for accuracy
   const totalSubmissions = assignments.reduce(
     (sum, a) =>
       sum +
@@ -62,6 +64,11 @@ export function LevelSelect({
       (a.submission_summary?.ungraded || 0),
     0
   );
+  const totalNeedsGrading = assignments.reduce(
+    (sum, a) => sum + (a.needs_grading_count ?? a.submission_summary?.ungraded ?? 0),
+    0
+  );
+  const totalGraded = Math.max(0, totalSubmissions - totalNeedsGrading);
   const progressPercent = totalSubmissions > 0 ? (totalGraded / totalSubmissions) * 100 : 0;
 
   return (
@@ -153,9 +160,15 @@ export function LevelSelect({
               const status = getDungeonStatus(assignment);
               const statusConfig = STATUS_CONFIG[status];
               const summary = assignment.submission_summary;
-              const gradedCount = summary?.graded || 0;
-              const totalCount =
-                (summary?.graded || 0) + (summary?.ungraded || 0);
+
+              // Calculate total submissions (excludes not_submitted)
+              const totalSubmitted = (summary?.graded || 0) + (summary?.ungraded || 0);
+
+              // Use needs_grading_count for accurate graded count
+              // needs_grading_count shows submissions that still need a score
+              const needsGrading = assignment.needs_grading_count ?? summary?.ungraded ?? 0;
+              const gradedCount = Math.max(0, totalSubmitted - needsGrading);
+              const totalCount = totalSubmitted;
 
               return (
                 <button

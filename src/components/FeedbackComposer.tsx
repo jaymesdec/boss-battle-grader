@@ -13,7 +13,7 @@ interface FeedbackComposerProps {
   currentGrades: Partial<Record<CompetencyId, Grade>>;
   currentFeedback: FeedbackInput;
   onFeedbackChange: (feedback: FeedbackInput) => void;
-  onGenerateAI: () => void;
+  onGenerateAI?: () => void;
   isGenerating?: boolean;
 }
 
@@ -70,40 +70,35 @@ export function FeedbackComposer({
 
       {/* Action Buttons */}
       <div className="flex items-center gap-3">
-        <button
-          onClick={onGenerateAI}
-          disabled={isGenerating || gradedCount === 0}
-          className={`
-            flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg
-            font-display text-sm transition-all
-            ${isGenerating || gradedCount === 0
-              ? 'bg-surface text-text-muted cursor-not-allowed'
-              : 'bg-gradient-to-r from-accent-secondary to-accent-primary text-background hover:opacity-90'
-            }
-          `}
-        >
-          {isGenerating ? (
-            <>
-              <span className="animate-spin">⚡</span>
-              <span>GENERATING...</span>
-            </>
-          ) : (
-            <>
-              <span>🤖</span>
-              <span>GENERATE AI FEEDBACK</span>
-            </>
-          )}
-        </button>
+        {onGenerateAI && (
+          <button
+            onClick={onGenerateAI}
+            disabled={isGenerating}
+            className={`
+              flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg
+              font-display text-sm transition-all
+              ${isGenerating
+                ? 'bg-surface text-text-muted cursor-not-allowed'
+                : 'bg-gradient-to-r from-accent-secondary to-accent-primary text-background hover:opacity-90'
+              }
+            `}
+          >
+            {isGenerating ? (
+              <>
+                <span className="animate-spin">⚡</span>
+                <span>GENERATING...</span>
+              </>
+            ) : (
+              <>
+                <span>🤖</span>
+                <span>GENERATE AI FEEDBACK</span>
+              </>
+            )}
+          </button>
+        )}
 
         <FeedbackTemplates onSelect={(template) => handleTextChange(template)} />
       </div>
-
-      {/* Hint */}
-      {gradedCount === 0 && (
-        <p className="text-xs text-text-muted mt-2 text-center">
-          Score at least one competency to enable AI feedback generation
-        </p>
-      )}
     </div>
   );
 }

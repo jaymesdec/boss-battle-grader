@@ -255,10 +255,26 @@ export interface Achievement {
 
 export type AgentTaskType =
   | 'generate_feedback'
+  | 'generate_all_feedback'
   | 'surface_highlights'
   | 'post_grades'
   | 'analyze_trends'
   | 'custom';
+
+// Response from generate_all_feedback task
+export interface ComprehensiveFeedbackResult {
+  rubricScores: Array<{
+    criterionId: string;
+    ratingId: string;
+    points: number;
+    comments: string;
+  }>;
+  competencyScores: Array<{
+    competencyId: CompetencyId;
+    grade: Grade;
+  }>;
+  generalSummary: string;
+}
 
 export interface AgentTask {
   task: AgentTaskType;

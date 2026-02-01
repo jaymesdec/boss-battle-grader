@@ -4,7 +4,16 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { runAgentLoop, streamAgentLoop } from '@/lib/agent/loop';
-import type { AgentTaskType, SessionState } from '@/types';
+import { anthropic, MODEL, MAX_TOKENS } from '@/lib/anthropic';
+import { postGrade, postComment } from '@/lib/canvas';
+import {
+  extractStudentIdentity,
+  anonymizeText,
+  deanonymizeObject,
+  stripHtml,
+} from '@/lib/privacy';
+import { COMPETENCIES, RUBRIC_DESCRIPTORS, COMPETENCY_ORDER } from '@/lib/competencies';
+import type { AgentTaskType, SessionState, CanvasRubric, ComprehensiveFeedbackResult } from '@/types';
 
 // -----------------------------------------------------------------------------
 // Types
@@ -36,6 +45,12 @@ interface AgentRequest {
   score?: number;
   comment?: string;
   existingCommentId?: number; // For updating existing comments
+  // Fields for generate_all_feedback task
+  rubric?: CanvasRubric[];
+  assignmentDescription?: string;
+  teacherNotes?: string;
+  // Fields for post_grades task with rubric assessment
+  rubricAssessment?: Record<string, { points: number; rating_id: string; comments: string }>;
 }
 
 // -----------------------------------------------------------------------------
@@ -62,6 +77,16 @@ export async function POST(request: NextRequest) {
       courseId: body.courseId || body.context?.courseId,
       assignmentId: body.assignmentId || body.context?.assignmentId,
     };
+
+    // Special handling for generate_all_feedback task
+    if (body.task === 'generate_all_feedback') {
+      return handleGenerateAllFeedback(body);
+    }
+
+    // Special handling for post_grades task (direct Canvas API calls)
+    if (body.task === 'post_grades') {
+      return handlePostGrades(body);
+    }
 
     // Build user message based on task type
     const userMessage = buildUserMessage(body.task, body.prompt, mergedContext, body.submissionContent);
@@ -92,6 +117,245 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Internal server error',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Generate All Feedback Handler
+// -----------------------------------------------------------------------------
+
+async function handleGenerateAllFeedback(body: AgentRequest) {
+  const { studentName, submissionContent, pdfImages, rubric, assignmentDescription, teacherNotes } = body;
+
+  // PRIVACY: Extract student identity for anonymization
+  const identity = extractStudentIdentity(studentName || '');
+
+  // PRIVACY: Anonymize all text content before sending to LLM
+  const anonymizedSubmission = anonymizeText(submissionContent || '', identity);
+  const anonymizedNotes = anonymizeText(teacherNotes || '', identity);
+  const cleanAssignmentDescription = stripHtml(assignmentDescription || '');
+
+  // Build rubric JSON for the prompt
+  const rubricJson = rubric?.map((criterion) => ({
+    id: criterion.id,
+    description: criterion.description,
+    long_description: criterion.long_description,
+    points: criterion.points,
+    ratings: criterion.ratings.map((r) => ({
+      id: r.id,
+      description: r.description,
+      long_description: r.long_description,
+      points: r.points,
+    })),
+  })) || [];
+
+  // Build competency definitions for the prompt
+  const competencyJson = COMPETENCY_ORDER.map((id) => ({
+    id,
+    name: COMPETENCIES[id].name,
+    description: COMPETENCIES[id].description,
+    gradeDescriptors: RUBRIC_DESCRIPTORS[id],
+  }));
+
+  // Build the comprehensive prompt
+  const systemPrompt = `You are an expert grading assistant helping a teacher provide feedback on student work.
+You will analyze the submission and generate scores and feedback for both the assignment rubric and the TD competencies.
+
+## CRITICAL STYLE REQUIREMENTS
+- Use 2nd person ("You demonstrated...", "Your work shows...")
+- NEVER use the student's name - they are referred to as [STUDENT] in the content but you should not use any name or placeholder in your output
+- NEVER say "your teacher" or reference the teacher in third person - speak AS the teacher directly
+- Be specific about what you observed but do NOT summarize or list what they submitted
+- Keep all feedback SHORT and DIRECT
+- If selecting the highest rating for a criterion: challenge them to go even further
+
+## OUTPUT FORMAT
+You must respond with ONLY valid JSON in this exact format:
+{
+  "rubricScores": [
+    {
+      "criterionId": "criterion_id_here",
+      "ratingId": "rating_id_here",
+      "points": 20,
+      "comments": "First sentence about what was done well. Second sentence with specific improvement or challenge."
+    }
+  ],
+  "competencyScores": [
+    { "competencyId": "collaboration", "grade": "B" }
+  ],
+  "generalSummary": "First sentence: overall assessment. Second sentence: key strength with evidence. Third sentence: primary growth opportunity or next challenge."
+}`;
+
+  const userPrompt = `## ASSIGNMENT DESCRIPTION
+${cleanAssignmentDescription || 'No assignment description provided.'}
+
+## RUBRIC CRITERIA
+${JSON.stringify(rubricJson, null, 2)}
+
+## TD COMPETENCIES
+${JSON.stringify(competencyJson, null, 2)}
+
+## STUDENT SUBMISSION
+${anonymizedSubmission || 'No text submission provided.'}
+
+${anonymizedNotes ? `## TEACHER NOTES (use as additional context)\n${anonymizedNotes}` : ''}
+
+## YOUR TASK
+1. For each RUBRIC CRITERION: Select the most appropriate rating and write exactly 2 sentences of feedback (what they did well + improvement/challenge)
+2. For each of the 9 TD COMPETENCIES: Assign a grade (A+, A, B, C, D, or F) based on evidence in the submission
+3. Write a GENERAL SUMMARY of exactly 3 sentences (overall assessment + key strength + growth opportunity)
+
+Respond with ONLY the JSON object, no other text.`;
+
+  // Build the message content with optional PDF images
+  const userContent: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } }> = [];
+
+  // Add PDF images first if available
+  if (pdfImages && pdfImages.length > 0) {
+    userContent.push({
+      type: 'text',
+      text: `I'm providing ${pdfImages.length} slide images from the student's PDF submission for your visual analysis:\n`,
+    });
+
+    for (let i = 0; i < pdfImages.length; i++) {
+      userContent.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: pdfImages[i].source.data,
+        },
+      });
+      userContent.push({
+        type: 'text',
+        text: `[Slide ${i + 1}]`,
+      });
+    }
+
+    userContent.push({
+      type: 'text',
+      text: '\n\n' + userPrompt,
+    });
+  } else {
+    userContent.push({
+      type: 'text',
+      text: userPrompt,
+    });
+  }
+
+  try {
+    // Call Claude directly for structured JSON output
+    const response = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userContent }],
+    });
+
+    // Extract text response
+    const textBlock = response.content.find((block) => block.type === 'text');
+    if (!textBlock || textBlock.type !== 'text') {
+      throw new Error('No text response from Claude');
+    }
+
+    // Parse JSON response
+    let result: ComprehensiveFeedbackResult;
+    try {
+      // Try to extract JSON from the response (in case there's extra text)
+      const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in response');
+      }
+      result = JSON.parse(jsonMatch[0]);
+    } catch (parseError) {
+      console.error('Failed to parse Claude response:', textBlock.text);
+      throw new Error('Failed to parse feedback response as JSON');
+    }
+
+    // PRIVACY: De-anonymize all text fields in the response
+    // (In case [STUDENT] slipped through, we remove it rather than replacing with name)
+    const cleanedResult = deanonymizeObject(result, identity);
+
+    return NextResponse.json({
+      success: true,
+      result: cleanedResult,
+    });
+  } catch (error) {
+    console.error('Generate all feedback error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to generate feedback',
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Post Grades Handler (Direct Canvas API Calls)
+// -----------------------------------------------------------------------------
+
+async function handlePostGrades(body: AgentRequest) {
+  const { courseId, assignmentId, userId, score, comment, rubricAssessment } = body;
+
+  if (!courseId || !assignmentId || !userId) {
+    return NextResponse.json(
+      { success: false, error: 'Missing required fields: courseId, assignmentId, or userId' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    // Build rubric assessment in Canvas format (points + comments, no rating_id needed for API)
+    let canvasRubricAssessment: Record<string, { points: number; comments?: string }> | undefined;
+
+    if (rubricAssessment && Object.keys(rubricAssessment).length > 0) {
+      canvasRubricAssessment = {};
+      for (const [criterionId, assessment] of Object.entries(rubricAssessment)) {
+        canvasRubricAssessment[criterionId] = {
+          points: assessment.points,
+          comments: assessment.comments || undefined,
+        };
+      }
+    }
+
+    // Post grade with rubric assessment
+    const gradeResult = await postGrade(
+      courseId,
+      assignmentId,
+      userId,
+      String(score || 0),
+      canvasRubricAssessment
+    );
+
+    if (!gradeResult.success) {
+      throw new Error(gradeResult.error || 'Failed to post grade');
+    }
+
+    // Post comment if provided
+    if (comment && comment.trim().length > 0) {
+      const commentResult = await postComment(courseId, assignmentId, userId, comment);
+      if (!commentResult.success) {
+        console.error('Warning: Failed to post comment:', commentResult.error);
+        // Don't fail the whole operation if comment fails
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      submissionId: gradeResult.data?.id,
+      postedGrade: gradeResult.data?.grade,
+    });
+  } catch (error) {
+    console.error('Post grades error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to post grades',
       },
       { status: 500 }
     );

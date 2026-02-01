@@ -662,15 +662,18 @@ export function BattleScreen({
                 <h2 className="font-display text-lg text-text-primary mb-4">
                   {assignmentName}
                 </h2>
-                <div
-                  className="prose prose-invert prose-sm max-w-none
-                    prose-headings:font-display prose-headings:text-text-primary
-                    prose-p:text-text-primary prose-li:text-text-primary
-                    prose-strong:text-accent-primary
-                    prose-h2:text-lg prose-h3:text-base
-                    prose-ul:list-disc prose-ol:list-decimal"
-                  dangerouslySetInnerHTML={{ __html: assignmentDescription }}
-                />
+                <div className="text-text-primary text-sm whitespace-pre-wrap">
+                  {assignmentDescription
+                    .replace(/<[^>]*>/g, '')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .replace(/Start Here\s*Syllabus\s*Modules\s*More Resources/gi, '')
+                    .replace(/\n{3,}/g, '\n\n')
+                    .trim()}
+                </div>
               </div>
             ) : (
               <SubmissionViewer
