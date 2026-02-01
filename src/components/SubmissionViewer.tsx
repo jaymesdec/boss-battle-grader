@@ -266,6 +266,7 @@ export function SubmissionViewer({
           parsedContent={parsedContent}
           isParsing={isParsing}
           onPDFPagesLoaded={handlePDFPagesLoaded}
+          onContentParsed={onContentParsed}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -322,12 +323,14 @@ function ContentDisplay({
   isParsing,
   onParse,
   onPDFPagesLoaded,
+  onContentParsed,
 }: {
   source: ContentSource;
   parsedContent: string | null;
   isParsing: boolean;
   onParse: () => void;
   onPDFPagesLoaded?: (pages: PDFPage[]) => void;
+  onContentParsed?: (content: string) => void;
 }) {
   if (source.type === 'text') {
     return (
@@ -364,6 +367,7 @@ function ContentDisplay({
   // File source
   const isImage = source.contentType.startsWith('image/');
   const isPdf = source.contentType === 'application/pdf';
+  const isNotebook = source.name.endsWith('.ipynb');
   const isDocument = source.contentType.includes('word') ||
                      source.contentType.includes('document') ||
                      source.name.endsWith('.docx') ||
@@ -396,6 +400,16 @@ function ContentDisplay({
           </p>
         </div>
       </div>
+    );
+  }
+
+  if (isNotebook) {
+    return (
+      <NotebookDisplay
+        url={source.url}
+        filename={source.name}
+        onContentParsed={onContentParsed}
+      />
     );
   }
 
@@ -492,4 +506,158 @@ async function parseFileContent(url: string, contentType: string): Promise<strin
 
   const data = await response.json();
   return data.result || 'No text extracted';
+}
+
+// =============================================================================
+// Notebook Types and Parsing
+// =============================================================================
+
+interface NotebookCell {
+  cell_type: 'code' | 'markdown' | 'raw';
+  source: string | string[];
+  outputs?: NotebookOutput[];
+}
+
+interface NotebookOutput {
+  output_type: string;
+  text?: string | string[];
+  data?: Record<string, string | string[]>;
+}
+
+interface NotebookData {
+  cells: NotebookCell[];
+  metadata?: Record<string, unknown>;
+}
+
+async function parseNotebookContent(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error('Failed to fetch notebook');
+  }
+
+  const notebook: NotebookData = await response.json();
+  const lines: string[] = [];
+
+  notebook.cells.forEach((cell, index) => {
+    const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source;
+
+    if (cell.cell_type === 'markdown') {
+      lines.push(`## Markdown Cell ${index + 1}`);
+      lines.push(source.trim());
+      lines.push('');
+    } else if (cell.cell_type === 'code') {
+      lines.push(`## Code Cell ${index + 1}`);
+      lines.push('```python');
+      lines.push(source.trim());
+      lines.push('```');
+
+      // Include outputs if present
+      if (cell.outputs && cell.outputs.length > 0) {
+        lines.push('### Output:');
+        cell.outputs.forEach((output) => {
+          if (output.text) {
+            const text = Array.isArray(output.text) ? output.text.join('') : output.text;
+            lines.push('```');
+            lines.push(text.trim());
+            lines.push('```');
+          } else if (output.data?.['text/plain']) {
+            const text = Array.isArray(output.data['text/plain'])
+              ? output.data['text/plain'].join('')
+              : output.data['text/plain'];
+            lines.push('```');
+            lines.push(text.trim());
+            lines.push('```');
+          }
+        });
+      }
+      lines.push('');
+    } else if (cell.cell_type === 'raw') {
+      lines.push(`## Raw Cell ${index + 1}`);
+      lines.push(source.trim());
+      lines.push('');
+    }
+  });
+
+  return lines.join('\n');
+}
+
+// =============================================================================
+// Notebook Display Component
+// =============================================================================
+
+function NotebookDisplay({
+  url,
+  filename,
+  onContentParsed,
+}: {
+  url: string;
+  filename: string;
+  onContentParsed?: (content: string) => void;
+}) {
+  const [notebookContent, setNotebookContent] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadNotebook() {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const content = await parseNotebookContent(url);
+        setNotebookContent(content);
+        // Notify parent so AI can use this content
+        onContentParsed?.(content);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load notebook');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadNotebook();
+  }, [url, onContentParsed]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8">
+        <div className="animate-spin text-4xl mb-4">📓</div>
+        <p className="text-text-muted text-sm">Loading notebook...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 bg-accent-danger/20 rounded-lg">
+        <p className="text-accent-danger">{error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 p-4 bg-surface rounded-lg">
+        <span className="text-4xl">📓</span>
+        <div>
+          <p className="text-text-primary font-display">{filename}</p>
+          <p className="text-text-muted text-sm">Jupyter Notebook</p>
+        </div>
+      </div>
+
+      {notebookContent && (
+        <div className="p-4 bg-surface/50 rounded-lg max-h-[500px] overflow-auto">
+          <h4 className="text-xs font-display text-text-muted mb-2">NOTEBOOK CONTENT</h4>
+          <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
+            {notebookContent}
+          </pre>
+        </div>
+      )}
+
+      <div className="p-2 bg-surface/30 rounded-lg">
+        <p className="text-xs text-text-muted text-center">
+          📓 AI can see all notebook cells when generating feedback
+        </p>
+      </div>
+    </div>
+  );
 }
