@@ -6,18 +6,11 @@
 
 import { useState } from 'react';
 import { COMPETENCY_ORDER, COMPETENCIES, RUBRIC_DESCRIPTORS } from '@/lib/competencies';
-import type { CompetencyId, Grade, CanvasRubric } from '@/types';
+import type { CompetencyId, Grade, CanvasRubric, RubricScore } from '@/types';
 
 const GRADES: Grade[] = ['A+', 'A', 'B', 'C', 'D', 'F'];
 
 type ScoringMode = 'competencies' | 'rubric';
-
-interface RubricScore {
-  criterionId: string;
-  ratingId: string;
-  points: number;
-  comments: string;
-}
 
 interface CompetencyScorerProps {
   // Competency grading
@@ -31,6 +24,9 @@ interface CompetencyScorerProps {
   onPostToCanvas: () => void;
   isPosting?: boolean;
   canPost?: boolean;
+  // Review overlay
+  onOpenReview?: () => void;
+  canReview?: boolean;
 }
 
 export function CompetencyScorer({
@@ -42,6 +38,8 @@ export function CompetencyScorer({
   onPostToCanvas,
   isPosting = false,
   canPost = false,
+  onOpenReview,
+  canReview = false,
 }: CompetencyScorerProps) {
   const [mode, setMode] = useState<ScoringMode>(rubric?.length ? 'rubric' : 'competencies');
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -158,34 +156,55 @@ export function CompetencyScorer({
         )}
       </div>
 
-      {/* Post to Canvas Button */}
-      <div className="p-3 border-t border-surface">
-        <button
-          onClick={onPostToCanvas}
-          disabled={isPosting || !canPost}
-          className={`
-            w-full py-3 rounded-lg font-display text-sm transition-all
-            flex items-center justify-center gap-2
-            ${isPosting || !canPost
-              ? 'bg-surface text-text-muted cursor-not-allowed'
-              : 'bg-gradient-to-r from-accent-gold to-accent-danger text-background hover:opacity-90'
-            }
-          `}
-        >
-          {isPosting ? (
-            <>
-              <span className="animate-spin">⏳</span>
-              <span>SAVING...</span>
-            </>
-          ) : (
-            <>
-              <span>💾</span>
-              <span>SAVE TO CANVAS</span>
-            </>
+      {/* Action Buttons */}
+      <div className="p-3 border-t border-surface space-y-2">
+        <div className="flex gap-2">
+          {/* Review Button */}
+          {onOpenReview && (
+            <button
+              onClick={onOpenReview}
+              disabled={!canReview}
+              className={`
+                flex-1 py-3 rounded-lg font-display text-sm transition-all
+                flex items-center justify-center gap-2
+                ${canReview
+                  ? 'bg-surface hover:bg-surface/80 text-text-primary'
+                  : 'bg-surface/50 text-text-muted cursor-not-allowed'
+                }
+              `}
+            >
+              <span>👁️</span>
+              <span>REVIEW</span>
+            </button>
           )}
-        </button>
+          {/* Post to Canvas Button */}
+          <button
+            onClick={onPostToCanvas}
+            disabled={isPosting || !canPost}
+            className={`
+              ${onOpenReview ? 'flex-1' : 'w-full'} py-3 rounded-lg font-display text-sm transition-all
+              flex items-center justify-center gap-2
+              ${isPosting || !canPost
+                ? 'bg-surface text-text-muted cursor-not-allowed'
+                : 'bg-gradient-to-r from-accent-gold to-accent-danger text-background hover:opacity-90'
+              }
+            `}
+          >
+            {isPosting ? (
+              <>
+                <span className="animate-spin">⏳</span>
+                <span>SAVING...</span>
+              </>
+            ) : (
+              <>
+                <span>💾</span>
+                <span>SAVE TO CANVAS</span>
+              </>
+            )}
+          </button>
+        </div>
         {!canPost && !isPosting && (
-          <p className="text-xs text-text-muted text-center mt-2">
+          <p className="text-xs text-text-muted text-center">
             {mode === 'competencies'
               ? 'Grade all 9 competencies to post'
               : `Score all ${totalCount} criteria to post`

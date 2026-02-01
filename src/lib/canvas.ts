@@ -128,6 +128,24 @@ class CanvasClient {
     });
     return data;
   }
+
+  async delete(endpoint: string): Promise<void> {
+    const url = endpoint.startsWith('http')
+      ? endpoint
+      : `${this.baseUrl}${endpoint}`;
+
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Canvas API error (${response.status}): ${error}`);
+    }
+  }
 }
 
 export const canvasClient = new CanvasClient();
@@ -245,6 +263,25 @@ export async function postComment(
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Failed to post comment',
+    };
+  }
+}
+
+export async function deleteComment(
+  courseId: number,
+  assignmentId: number,
+  userId: number,
+  commentId: number
+): Promise<ApiResponse<void>> {
+  try {
+    await canvasClient.delete(
+      `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}/comments/${commentId}`
+    );
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to delete comment',
     };
   }
 }

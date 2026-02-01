@@ -13,6 +13,7 @@ import type { PDFPage } from './PDFViewer';
 import { BatchUploadModal } from './BatchUploadModal';
 import { FeedbackComposer } from './FeedbackComposer';
 import { CompetencyScorer } from './CompetencyScorer';
+import { FeedbackReviewOverlay } from './FeedbackReviewOverlay';
 import {
   createInitialGameState,
   gameReducer,
@@ -30,14 +31,8 @@ import type {
   CanvasRubric,
   BatchAttachment,
   ComprehensiveFeedbackResult,
+  RubricScore,
 } from '@/types';
-
-interface RubricScore {
-  criterionId: string;
-  ratingId: string;
-  points: number;
-  comments: string;
-}
 
 interface BattleScreenProps {
   courseId: number;
@@ -112,6 +107,9 @@ export function BattleScreen({
 
   // Comprehensive AI feedback generation (all at once)
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+
+  // Feedback review overlay
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
 
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
@@ -421,6 +419,11 @@ export function BattleScreen({
     gameState.combo,
   ]);
 
+  // Open feedback review overlay
+  const handleOpenReview = useCallback(() => {
+    setIsReviewOpen(true);
+  }, []);
+
   // Post grades to Canvas
   const handlePostToCanvas = useCallback(async () => {
     if (!currentSubmission) return;
@@ -482,6 +485,9 @@ export function BattleScreen({
 
       // Play success sound on successful post
       playSound('success');
+
+      // Close review overlay if open
+      setIsReviewOpen(false);
 
       // Save competency scores to localStorage (these don't go to Canvas)
       if (Object.keys(currentGrades).length > 0) {
@@ -714,6 +720,11 @@ export function BattleScreen({
               Object.keys(currentGrades).length === 9 ||
               (rubric && Object.keys(rubricScores).length === rubric.length)
             }
+            onOpenReview={handleOpenReview}
+            canReview={
+              Object.keys(currentGrades).length === 9 ||
+              (rubric && Object.keys(rubricScores).length === rubric.length)
+            }
           />
         </div>
       </div>
@@ -724,6 +735,21 @@ export function BattleScreen({
         onClose={() => setIsBatchModalOpen(false)}
         submissions={submissions}
         onAttachToSubmissions={handleBatchAttachments}
+      />
+
+      {/* Feedback Review Overlay */}
+      <FeedbackReviewOverlay
+        isOpen={isReviewOpen}
+        onClose={() => setIsReviewOpen(false)}
+        onSave={handlePostToCanvas}
+        rubricScores={rubricScores}
+        onRubricScoresChange={setRubricScores}
+        summaryFeedback={currentFeedback.text}
+        onSummaryFeedbackChange={(text) => setCurrentFeedback(prev => ({ ...prev, text }))}
+        rubric={rubric}
+        studentName={studentName}
+        totalPoints={rubric?.reduce((sum, c) => sum + c.points, 0) || 100}
+        isSaving={isPosting}
       />
     </div>
   );

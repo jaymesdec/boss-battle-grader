@@ -170,7 +170,16 @@ export function LevelSelect({
         {/* Assignment Grid - Dungeon Doors */}
         {!isLoading && assignments.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {assignments.map((assignment, index) => {
+            {[...assignments]
+              .sort((a, b) => {
+                // Sort by due date descending (most recently due first)
+                // Assignments without due dates go to the end
+                if (!a.due_at && !b.due_at) return 0;
+                if (!a.due_at) return 1;
+                if (!b.due_at) return -1;
+                return new Date(b.due_at).getTime() - new Date(a.due_at).getTime();
+              })
+              .map((assignment, index) => {
               const status = getDungeonStatus(assignment);
               const statusConfig = STATUS_CONFIG[status];
               const summary = assignment.submission_summary;

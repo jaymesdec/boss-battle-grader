@@ -105,6 +105,13 @@ export interface CanvasRubric {
   }>;
 }
 
+export interface RubricScore {
+  criterionId: string;
+  ratingId: string;
+  points: number;
+  comments: string;
+}
+
 export interface CanvasSubmission {
   id: number;
   user_id: number;

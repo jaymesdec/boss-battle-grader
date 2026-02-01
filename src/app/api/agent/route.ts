@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runAgentLoop, streamAgentLoop } from '@/lib/agent/loop';
 import { anthropic, MODEL, MAX_TOKENS } from '@/lib/anthropic';
-import { postGrade, postComment } from '@/lib/canvas';
+import { postGrade, postComment, deleteComment, canvasClient } from '@/lib/canvas';
 import {
   extractStudentIdentity,
   anonymizeText,
@@ -336,8 +336,32 @@ async function handlePostGrades(body: AgentRequest) {
       throw new Error(gradeResult.error || 'Failed to post grade');
     }
 
-    // Post comment if provided
+    // Post comment if provided - delete existing teacher comments first
     if (comment && comment.trim().length > 0) {
+      // Fetch current submission to get existing comments
+      try {
+        const submission = await canvasClient.get<{
+          user_id: number;
+          submission_comments?: Array<{ id: number; author_id: number }>;
+        }>(
+          `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`,
+          { 'include[]': 'submission_comments' }
+        );
+
+        // Delete existing teacher comments (comments not from the student)
+        if (submission.submission_comments) {
+          for (const existingComment of submission.submission_comments) {
+            if (existingComment.author_id !== userId) {
+              await deleteComment(courseId, assignmentId, userId, existingComment.id);
+            }
+          }
+        }
+      } catch (deleteError) {
+        console.error('Warning: Failed to delete existing comments:', deleteError);
+        // Continue anyway - not critical
+      }
+
+      // Now post the new comment
       const commentResult = await postComment(courseId, assignmentId, userId, comment);
       if (!commentResult.success) {
         console.error('Warning: Failed to post comment:', commentResult.error);
