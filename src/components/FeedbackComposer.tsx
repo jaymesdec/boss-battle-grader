@@ -4,7 +4,7 @@
 // FeedbackComposer - Text feedback with AI assistance
 // =============================================================================
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { FeedbackInput, CompetencyId, Grade } from '@/types';
 
 interface FeedbackComposerProps {
@@ -25,22 +25,15 @@ export function FeedbackComposer({
   onGenerateAI,
   isGenerating = false,
 }: FeedbackComposerProps) {
-  const [textFeedback, setTextFeedback] = useState(currentFeedback.text);
+  // Fully controlled component - use parent's state directly
+  const textFeedback = currentFeedback.text;
 
-  // Sync with parent when currentFeedback changes (e.g., student switch or AI generation)
-  useEffect(() => {
-    setTextFeedback(currentFeedback.text);
-  }, [currentFeedback.text]);
-
-  // Update parent when local feedback changes
-  useEffect(() => {
-    if (textFeedback !== currentFeedback.text) {
-      onFeedbackChange({
-        text: textFeedback,
-        voiceDurationSeconds: 0,
-      });
-    }
-  }, [textFeedback, currentFeedback.text, onFeedbackChange]);
+  const handleTextChange = (newText: string) => {
+    onFeedbackChange({
+      text: newText,
+      voiceDurationSeconds: 0,
+    });
+  };
 
   // Count graded competencies
   const gradedCount = Object.keys(currentGrades).length;
@@ -67,8 +60,8 @@ export function FeedbackComposer({
       <div className="flex-1 mb-3">
         <textarea
           value={textFeedback}
-          onChange={(e) => setTextFeedback(e.target.value)}
-          placeholder="Type your feedback here, or use voice recording below..."
+          onChange={(e) => handleTextChange(e.target.value)}
+          placeholder="Type your feedback here..."
           className="w-full h-full p-3 bg-surface/50 border border-surface rounded-lg
                      text-text-primary placeholder-text-muted text-sm resize-none
                      focus:outline-none focus:border-accent-primary transition-colors"
@@ -102,7 +95,7 @@ export function FeedbackComposer({
           )}
         </button>
 
-        <FeedbackTemplates onSelect={(template) => setTextFeedback(template)} />
+        <FeedbackTemplates onSelect={(template) => handleTextChange(template)} />
       </div>
 
       {/* Hint */}
