@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { useState, useCallback, useEffect } from 'react';
+import { useSession, signIn } from 'next-auth/react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
 import type { CanvasSubmission, BatchAttachment } from '@/types';
 
@@ -344,6 +345,14 @@ function ContentDisplay({
   }
 
   if (source.type === 'url') {
+    // Check if it's a Google Docs URL
+    const isGoogleDoc = source.url.includes('docs.google.com/document') ||
+                        source.url.includes('drive.google.com');
+
+    if (isGoogleDoc) {
+      return <GoogleDocViewer url={source.url} onContentParsed={onContentParsed} />;
+    }
+
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 p-3 bg-surface rounded-lg">
@@ -756,4 +765,208 @@ function ScriptDisplay({
       </div>
     </div>
   );
+}
+
+// =============================================================================
+// Google Doc Display Component
+// =============================================================================
+
+interface GoogleDocState {
+  status: 'loading' | 'success' | 'not_connected' | 'error';
+  content?: string;
+  error?: string;
+  errorCode?: string;
+  fetchedAt?: Date;
+}
+
+function GoogleDocViewer({
+  url,
+  onContentParsed,
+}: {
+  url: string;
+  onContentParsed?: (content: string) => void;
+}) {
+  const { data: session, status: sessionStatus } = useSession();
+  const [state, setState] = useState<GoogleDocState>({ status: 'loading' });
+
+  useEffect(() => {
+    async function fetchGoogleDoc() {
+      setState({ status: 'loading' });
+
+      try {
+        const response = await fetch(`/api/google-docs?url=${encodeURIComponent(url)}`);
+        const result = await response.json();
+
+        if (result.success) {
+          setState({
+            status: 'success',
+            content: result.content,
+            fetchedAt: new Date(),
+          });
+          onContentParsed?.(result.content);
+        } else if (result.errorCode === 'NOT_AUTHENTICATED') {
+          setState({ status: 'not_connected' });
+        } else {
+          setState({
+            status: 'error',
+            error: result.error,
+            errorCode: result.errorCode,
+          });
+        }
+      } catch (err) {
+        setState({
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Failed to fetch document',
+          errorCode: 'UNKNOWN',
+        });
+      }
+    }
+
+    // Wait for session to be determined before fetching
+    if (sessionStatus !== 'loading') {
+      fetchGoogleDoc();
+    }
+  }, [url, sessionStatus, onContentParsed]);
+
+  if (state.status === 'loading' || sessionStatus === 'loading') {
+    return (
+      <div className="flex flex-col items-center justify-center p-8">
+        <div className="animate-spin text-4xl mb-4">📄</div>
+        <p className="text-text-muted text-sm">Loading Google Doc...</p>
+      </div>
+    );
+  }
+
+  if (state.status === 'not_connected') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 p-3 bg-surface rounded-lg">
+          <span className="text-accent-secondary">📄</span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary hover:underline text-sm break-all"
+          >
+            {url}
+          </a>
+        </div>
+
+        <div className="p-4 bg-surface rounded-lg border border-accent-secondary/30">
+          <p className="text-text-primary mb-3">
+            This submission is a private Google Doc.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => signIn('google')}
+              className="px-4 py-2 bg-accent-primary text-background rounded-lg text-sm font-display hover:bg-accent-primary/80 transition-colors"
+            >
+              Connect Google Account
+            </button>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent-primary hover:underline text-sm"
+            >
+              Or open manually
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 p-3 bg-surface rounded-lg">
+          <span className="text-accent-secondary">📄</span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary hover:underline text-sm break-all"
+          >
+            {url}
+          </a>
+        </div>
+
+        <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/30">
+          <p className="text-red-400 mb-2">{getGoogleDocErrorMessage(state.errorCode)}</p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary hover:underline text-sm"
+          >
+            Open in Google Docs
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Success state
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between p-3 bg-surface rounded-lg">
+        <div className="flex items-center gap-2">
+          <span className="text-green-400">📄</span>
+          <span className="text-text-primary text-sm">Google Doc</span>
+          {state.fetchedAt && (
+            <span className="text-text-muted text-xs">
+              (fetched {formatRelativeTime(state.fetchedAt)})
+            </span>
+          )}
+        </div>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent-primary hover:underline text-xs"
+        >
+          Open in Google Docs
+        </a>
+      </div>
+
+      <div className="p-4 bg-surface/50 rounded-lg max-h-[500px] overflow-auto">
+        <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
+          {state.content}
+        </pre>
+      </div>
+
+      <div className="p-2 bg-surface/30 rounded-lg">
+        <p className="text-xs text-text-muted text-center">
+          📄 AI can see the full document when generating feedback
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function getGoogleDocErrorMessage(errorCode?: string): string {
+  switch (errorCode) {
+    case 'ACCESS_DENIED':
+      return "Your Google account doesn't have access to this document.";
+    case 'NOT_FOUND':
+      return "This document has been deleted or moved.";
+    case 'RATE_LIMITED':
+      return "Too many requests. Please wait a moment and try again.";
+    case 'UNSUPPORTED_TYPE':
+      return "This document type is not supported. Only Google Docs can be processed.";
+    case 'INVALID_URL':
+      return "This doesn't appear to be a valid Google Docs URL.";
+    default:
+      return "Unable to load this Google Doc.";
+  }
+}
+
+function formatRelativeTime(date: Date): string {
+  const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return date.toLocaleDateString();
 }

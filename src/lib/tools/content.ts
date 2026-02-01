@@ -4,6 +4,7 @@
 
 import mammoth from 'mammoth';
 import { fetchSubmissionFiles } from '@/lib/canvas';
+import { fetchGoogleDoc, parseGoogleDocsUrl } from '@/lib/google';
 import type { ToolDefinition, CanvasSubmission } from '@/types';
 
 // Dynamic import for pdf-parse to handle ESM/CJS issues
@@ -128,10 +129,6 @@ async function parsePdf(buffer: ArrayBuffer): Promise<string> {
   }
 }
 
-function isGoogleDocsUrl(url: string): boolean {
-  return url.includes('docs.google.com') || url.includes('drive.google.com');
-}
-
 // -----------------------------------------------------------------------------
 // Tool Implementations
 // -----------------------------------------------------------------------------
@@ -234,17 +231,64 @@ export async function executeParseFile(
 
 export async function executeParseUrl(url: string): Promise<string> {
   try {
-    // Handle Google Docs - convert to export URL
-    let fetchUrl = url;
-    if (isGoogleDocsUrl(url)) {
-      // Extract document ID and create export URL
-      const docIdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if (docIdMatch) {
-        fetchUrl = `https://docs.google.com/document/d/${docIdMatch[1]}/export?format=txt`;
-      }
+    // Check if it's a Google Docs URL
+    const googleInfo = parseGoogleDocsUrl(url);
+
+    // Handle unsupported Google doc types (Sheets, Slides)
+    if (googleInfo.isUnsupportedType) {
+      return JSON.stringify({
+        success: false,
+        error: `${googleInfo.docType} is not supported. Only Google Docs can be processed.`,
+        errorCode: 'UNSUPPORTED_TYPE',
+        sourceUrl: url,
+      });
     }
 
-    const response = await fetch(fetchUrl, {
+    // Handle Google Docs
+    if (googleInfo.isGoogleDoc && googleInfo.documentId) {
+      // Try public export first
+      try {
+        const publicUrl = `https://docs.google.com/document/d/${googleInfo.documentId}/export?format=txt`;
+        const response = await fetch(publicUrl, {
+          headers: {
+            'User-Agent': 'BossBattleGrader/1.0',
+          },
+        });
+
+        if (response.ok) {
+          const text = await response.text();
+          return JSON.stringify({
+            success: true,
+            content: text.slice(0, 50000),
+            sourceUrl: url,
+            method: 'public',
+          });
+        }
+      } catch {
+        // Public access failed, try OAuth
+      }
+
+      // Fall back to OAuth
+      const result = await fetchGoogleDoc(googleInfo.documentId);
+      if (result.success && result.content) {
+        return JSON.stringify({
+          success: true,
+          content: result.content.slice(0, 50000),
+          sourceUrl: url,
+          method: 'oauth',
+        });
+      }
+
+      return JSON.stringify({
+        success: false,
+        error: result.error,
+        errorCode: result.errorCode,
+        sourceUrl: url,
+      });
+    }
+
+    // Non-Google URL - fetch directly
+    const response = await fetch(url, {
       headers: {
         'User-Agent': 'BossBattleGrader/1.0',
       },
