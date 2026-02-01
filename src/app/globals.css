@@ -109,6 +109,200 @@ body {
   animation: shake 0.5s ease-in-out;
 }
 
+/* =============================================================================
+   Screen Transitions - Retro RPG Style
+   ============================================================================= */
+
+@keyframes wipe-in {
+  from {
+    clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+  }
+  to {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cascade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes victory-reveal {
+  0% {
+    opacity: 0;
+    transform: scale(1.1);
+    filter: brightness(2);
+  }
+  50% {
+    filter: brightness(1.5);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+.animate-wipe-in {
+  animation: wipe-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-up {
+  animation: fade-up 0.3s ease-out forwards;
+}
+
+.animate-cascade-in {
+  animation: cascade-in 0.35s ease-out backwards;
+}
+
+.animate-victory-reveal {
+  animation: victory-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Stagger delays via CSS custom property */
+.stagger-item {
+  animation: cascade-in 0.3s ease-out backwards;
+  animation-delay: calc(var(--stagger-index, 0) * 50ms);
+}
+
+/* =============================================================================
+   XP Popup & Combo Effects
+   ============================================================================= */
+
+@keyframes xp-float {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    text-shadow: 0 0 10px var(--accent-gold);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-60px) scale(0.8);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+.xp-popup {
+  animation: xp-float 1.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  font-family: "Press Start 2P", monospace;
+  color: var(--accent-gold);
+  -webkit-text-stroke: 2px var(--background);
+  paint-order: stroke fill;
+}
+
+/* Combo meter glow based on level */
+@keyframes combo-pulse {
+  0%, 100% {
+    box-shadow: 0 0 5px var(--accent-primary);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--accent-primary), 0 0 40px var(--accent-primary);
+  }
+}
+
+.combo-glow-low {
+  animation: combo-pulse 2s ease-in-out infinite;
+}
+
+.combo-glow-medium {
+  animation: combo-pulse 1s ease-in-out infinite;
+}
+
+.combo-glow-high {
+  animation: combo-pulse 0.5s ease-in-out infinite, shake 0.3s ease-in-out infinite;
+}
+
+/* =============================================================================
+   Pixel-Art UI System
+   ============================================================================= */
+
+/* 8-bit shadow effect */
+.pixel-shadow {
+  box-shadow:
+    4px 4px 0 0 rgba(0, 0, 0, 0.3),
+    8px 8px 0 0 rgba(0, 0, 0, 0.15);
+}
+
+/* Retro button with press effect */
+.pixel-button {
+  position: relative;
+  box-shadow: 0 4px 0 0 var(--background);
+  transition: transform 0.05s ease;
+}
+
+.pixel-button:active {
+  transform: translateY(4px);
+  box-shadow: none;
+}
+
+/* Card hover lift */
+.pixel-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pixel-card:hover {
+  transform: translateY(-4px);
+}
+
+/* Focus visible for pixel elements */
+.pixel-button:focus-visible,
+.pixel-card:focus-visible {
+  outline: 4px solid var(--accent-primary);
+  outline-offset: 4px;
+}
+
+/* =============================================================================
+   Accessibility - Reduced Motion
+   ============================================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .animate-wipe-in,
+  .animate-fade-up,
+  .animate-cascade-in,
+  .animate-victory-reveal,
+  .animate-ping-once,
+  .animate-shake,
+  .stagger-item,
+  .xp-popup,
+  .combo-glow-low,
+  .combo-glow-medium,
+  .combo-glow-high {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+
+  .pixel-card:hover {
+    transform: none;
+  }
+}
+
 /* Prose styles for submission content */
 .prose-invert {
   color: var(--text-primary);

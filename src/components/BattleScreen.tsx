@@ -19,6 +19,8 @@ import {
   calculatePoints,
   POINTS,
 } from '@/lib/game';
+import { saveCompetencyScores, loadCompetencyScores } from '@/lib/storage';
+import { useSound } from '@/hooks/useSound';
 import type {
   CanvasSubmission,
   StudentCharacter,
@@ -27,12 +29,14 @@ import type {
   FeedbackInput,
   CanvasRubric,
   BatchAttachment,
+  ComprehensiveFeedbackResult,
 } from '@/types';
 
 interface RubricScore {
   criterionId: string;
   ratingId: string;
   points: number;
+  comments: string;
 }
 
 interface BattleScreenProps {
@@ -40,6 +44,7 @@ interface BattleScreenProps {
   courseName: string;
   assignmentId: number;
   assignmentName: string;
+  assignmentDescription?: string;
   submissions: CanvasSubmission[];
   rubric?: CanvasRubric[];
   onBack: () => void;
@@ -50,12 +55,16 @@ export function BattleScreen({
   courseName,
   assignmentId,
   assignmentName,
+  assignmentDescription,
   submissions,
   rubric,
   onBack,
 }: BattleScreenProps) {
   // Game state
   const [gameState, dispatch] = useReducer(gameReducer, null, createInitialGameState);
+
+  // Sound effects
+  const { play: playSound } = useSound(gameState.soundEnabled);
 
   // Current selection
   const [currentUserId, setCurrentUserId] = useState<number | null>(
@@ -95,6 +104,15 @@ export function BattleScreen({
   // Track existing comment ID for updating instead of creating new
   const [existingCommentId, setExistingCommentId] = useState<number | null>(null);
 
+  // Collapsible student panel
+  const [isStudentPanelOpen, setIsStudentPanelOpen] = useState(true);
+
+  // Show assignment description toggle
+  const [showAssignmentDescription, setShowAssignmentDescription] = useState(false);
+
+  // Comprehensive AI feedback generation (all at once)
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
   const studentName = currentSubmission?.user?.name || `Student ${currentSubmission?.user_id || 0}`;
@@ -132,6 +150,7 @@ export function BattleScreen({
           criterionId,
           ratingId: assessment.rating_id,
           points: assessment.points,
+          comments: assessment.comments || '',
         };
       }
       setRubricScores(existingScores);
@@ -158,8 +177,13 @@ export function BattleScreen({
       setExistingCommentId(null);
     }
 
-    // Reset competency grades (not stored in Canvas)
-    setCurrentGrades({});
+    // Load competency grades from localStorage (not stored in Canvas)
+    const savedGrades = loadCompetencyScores(userId, assignmentId);
+    if (savedGrades && Object.keys(savedGrades).length > 0) {
+      setCurrentGrades(savedGrades);
+    } else {
+      setCurrentGrades({});
+    }
 
     // Check for batch attachment for this student
     const batchAttachment = batchAttachments.get(userId);
@@ -220,6 +244,9 @@ export function BattleScreen({
 
       const isNewGrade = !prev[competencyId];
       if (isNewGrade) {
+        // Play success sound for new grade
+        playSound('success');
+
         // Award points for grading a competency
         const points = calculatePoints({ type: 'grade_competency' }, gameState.combo);
         dispatch({ type: 'ADD_XP', points: points.total });
@@ -235,7 +262,7 @@ export function BattleScreen({
 
       return { ...prev, [competencyId]: grade };
     });
-  }, [gameState.combo]);
+  }, [gameState.combo, playSound]);
 
   // Handle rubric score change
   const handleRubricScoreChange = useCallback((criterionId: string, score: RubricScore | null) => {
@@ -306,20 +333,136 @@ export function BattleScreen({
     }
   }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo, pdfImages]);
 
+  // Generate ALL feedback at once (rubric scores, competency scores, and summary)
+  const handleGenerateAllFeedback = useCallback(async () => {
+    if (!currentSubmission) return;
+
+    setIsGeneratingAll(true);
+    try {
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task: 'generate_all_feedback',
+          studentName: currentStudent?.displayName || 'Student',
+          submissionContent: parsedContent || currentSubmission?.body || '',
+          pdfImages: pdfImages.length > 0 ? pdfImages : undefined,
+          rubric: rubric,
+          assignmentDescription: assignmentDescription,
+          teacherNotes: currentFeedback.text, // Use current feedback text as teacher notes
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate feedback');
+      }
+
+      const data = await response.json();
+
+      if (!data.success || !data.result) {
+        throw new Error('Invalid response from AI');
+      }
+
+      const result = data.result as ComprehensiveFeedbackResult;
+
+      // Update rubric scores
+      if (result.rubricScores && result.rubricScores.length > 0) {
+        const newScores: Record<string, RubricScore> = {};
+        for (const score of result.rubricScores) {
+          newScores[score.criterionId] = {
+            criterionId: score.criterionId,
+            ratingId: score.ratingId,
+            points: score.points,
+            comments: score.comments,
+          };
+        }
+        setRubricScores(newScores);
+      }
+
+      // Update competency grades
+      if (result.competencyScores && result.competencyScores.length > 0) {
+        const newGrades: Partial<Record<CompetencyId, Grade>> = {};
+        for (const score of result.competencyScores) {
+          newGrades[score.competencyId] = score.grade;
+        }
+        setCurrentGrades(newGrades);
+
+        // Save to localStorage
+        if (currentSubmission) {
+          saveCompetencyScores(currentSubmission.user_id, assignmentId, newGrades);
+        }
+      }
+
+      // Update feedback with general summary (replaces teacher notes)
+      if (result.generalSummary) {
+        setCurrentFeedback({ text: result.generalSummary, voiceDurationSeconds: 0 });
+      }
+
+      // Award points for using AI
+      const points = calculatePoints({ type: 'generate_ai' }, gameState.combo);
+      dispatch({ type: 'ADD_XP', points: points.total });
+
+    } catch (error) {
+      console.error('Error generating comprehensive feedback:', error);
+      // Could add a toast notification here
+    } finally {
+      setIsGeneratingAll(false);
+    }
+  }, [
+    currentSubmission,
+    currentStudent,
+    parsedContent,
+    pdfImages,
+    rubric,
+    assignmentDescription,
+    currentFeedback.text,
+    assignmentId,
+    gameState.combo,
+  ]);
+
   // Post grades to Canvas
   const handlePostToCanvas = useCallback(async () => {
-    if (!currentSubmission || Object.keys(currentGrades).length !== 9) return;
+    if (!currentSubmission) return;
+
+    // Determine if we're in rubric mode or competency mode
+    const hasRubricScores = Object.keys(rubricScores).length > 0 && rubric && rubric.length > 0;
+    const hasCompetencyGrades = Object.keys(currentGrades).length === 9;
+
+    // Must have either all rubric scores or all competency grades
+    if (!hasRubricScores && !hasCompetencyGrades) {
+      console.error('Must complete all scoring before posting to Canvas');
+      return;
+    }
 
     setIsPosting(true);
     try {
-      // Calculate final score based on grades
-      const gradeValues: Record<Grade, number> = {
-        'A+': 100, 'A': 95, 'B': 85, 'C': 75, 'D': 65, 'F': 50,
-      };
-      const totalScore = Object.values(currentGrades).reduce(
-        (sum, grade) => sum + (gradeValues[grade] || 0),
-        0
-      ) / 9;
+      let totalScore: number;
+      let rubricAssessment: Record<string, { points: number; rating_id: string; comments: string }> | undefined;
+
+      if (hasRubricScores && rubric) {
+        // Calculate total from rubric scores
+        totalScore = Object.values(rubricScores).reduce((sum, score) => sum + score.points, 0);
+
+        // Build rubric assessment for Canvas
+        rubricAssessment = {};
+        for (const [criterionId, score] of Object.entries(rubricScores)) {
+          rubricAssessment[criterionId] = {
+            points: score.points,
+            rating_id: score.ratingId,
+            comments: score.comments || '',
+          };
+        }
+      } else {
+        // Calculate score from competency grades
+        const gradeValues: Record<Grade, number> = {
+          'A+': 100, 'A': 95, 'B': 85, 'C': 75, 'D': 65, 'F': 50,
+        };
+        totalScore = Object.values(currentGrades).reduce(
+          (sum, grade) => sum + (gradeValues[grade] || 0),
+          0
+        ) / 9;
+      }
 
       const response = await fetch('/api/agent', {
         method: 'POST',
@@ -331,11 +474,19 @@ export function BattleScreen({
           userId: currentSubmission.user_id,
           score: Math.round(totalScore),
           comment: currentFeedback.text,
-          existingCommentId: existingCommentId, // Pass for updating existing comment
+          rubricAssessment,
         }),
       });
 
       if (!response.ok) throw new Error('Failed to post to Canvas');
+
+      // Play success sound on successful post
+      playSound('success');
+
+      // Save competency scores to localStorage (these don't go to Canvas)
+      if (Object.keys(currentGrades).length > 0) {
+        saveCompetencyScores(currentSubmission.user_id, assignmentId, currentGrades);
+      }
 
       // Mark as graded
       setGradedIds((prev) => new Set([...prev, currentSubmission.user_id]));
@@ -371,6 +522,8 @@ export function BattleScreen({
   }, [
     currentSubmission,
     currentGrades,
+    rubricScores,
+    rubric,
     currentFeedback,
     courseId,
     assignmentId,
@@ -378,7 +531,7 @@ export function BattleScreen({
     gradedIds,
     submissions,
     handleSelectStudent,
-    existingCommentId,
+    playSound,
   ]);
 
   // Handle content parsed from submission
@@ -394,61 +547,140 @@ export function BattleScreen({
         gradedCount={gradedIds.size}
         totalCount={submissions.length}
         onBack={onBack}
+        onToggleSound={() => dispatch({ type: 'TOGGLE_SOUND' })}
         assignmentName={assignmentName}
         courseName={courseName}
       />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel: Student Queue + Character Card */}
-        <div className="w-72 flex flex-col border-r border-surface bg-surface/10">
-          {/* Character Card */}
-          <div className="h-80 border-b border-surface">
-            <CharacterCard
-              student={currentStudent}
-              currentGrades={currentGrades}
-              isLoading={isLoading}
-            />
-          </div>
+        {/* Left Panel: Student Queue + Character Card (Collapsible) */}
+        <div
+          className={`
+            flex flex-col border-r border-surface bg-surface/10 transition-all duration-300
+            ${isStudentPanelOpen ? 'w-72' : 'w-12'}
+          `}
+        >
+          {/* Collapse Toggle */}
+          <button
+            onClick={() => setIsStudentPanelOpen(!isStudentPanelOpen)}
+            className="p-2 border-b border-surface hover:bg-surface/50 transition-colors flex items-center justify-center"
+            title={isStudentPanelOpen ? 'Collapse panel' : 'Expand panel'}
+          >
+            <span className="text-text-muted">
+              {isStudentPanelOpen ? '◀' : '▶'}
+            </span>
+          </button>
 
-          {/* Student Queue */}
-          <div className="flex-1 overflow-y-auto">
-            {/* Batch Upload Button */}
-            <div className="p-2 border-b border-surface">
-              <button
-                onClick={() => setIsBatchModalOpen(true)}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-surface/50 hover:bg-surface rounded-lg text-text-muted hover:text-text-primary transition-colors text-sm"
-              >
-                <span>📦</span>
-                <span>Batch Upload PDFs</span>
-                {batchAttachments.size > 0 && (
-                  <span className="px-1.5 py-0.5 bg-accent-primary/20 text-accent-primary text-xs rounded">
-                    {batchAttachments.size}
-                  </span>
-                )}
-              </button>
+          {isStudentPanelOpen ? (
+            <>
+              {/* Character Card */}
+              <div className="h-80 border-b border-surface">
+                <CharacterCard
+                  student={currentStudent}
+                  currentGrades={currentGrades}
+                  isLoading={isLoading}
+                />
+              </div>
+
+              {/* Student Queue */}
+              <div className="flex-1 overflow-y-auto">
+                {/* Batch Upload Button */}
+                <div className="p-2 border-b border-surface">
+                  <button
+                    onClick={() => setIsBatchModalOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-surface/50 hover:bg-surface rounded-lg text-text-muted hover:text-text-primary transition-colors text-sm"
+                  >
+                    <span>📦</span>
+                    <span>Batch Upload PDFs</span>
+                    {batchAttachments.size > 0 && (
+                      <span className="px-1.5 py-0.5 bg-accent-primary/20 text-accent-primary text-xs rounded">
+                        {batchAttachments.size}
+                      </span>
+                    )}
+                  </button>
+                </div>
+                <StudentQueue
+                  submissions={submissions}
+                  currentUserId={currentUserId}
+                  gradedIds={gradedIds}
+                  batchUploadedIds={new Set(batchAttachments.keys())}
+                  onSelect={handleSelectStudent}
+                />
+              </div>
+            </>
+          ) : (
+            /* Collapsed state - show current student mini info */
+            <div className="flex-1 flex flex-col items-center py-4 gap-2">
+              <span className="text-2xl">👤</span>
+              <span className="text-xs text-text-muted [writing-mode:vertical-rl] rotate-180">
+                {currentStudent?.displayName || 'Select'}
+              </span>
             </div>
-            <StudentQueue
-              submissions={submissions}
-              currentUserId={currentUserId}
-              gradedIds={gradedIds}
-              batchUploadedIds={new Set(batchAttachments.keys())}
-              onSelect={handleSelectStudent}
-            />
-          </div>
+          )}
         </div>
 
         {/* Center Panel: Submission Viewer + Feedback Composer */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Submission Viewer (Top) */}
+          {/* Toggle Bar */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-surface bg-surface/20">
+            <button
+              onClick={() => setShowAssignmentDescription(false)}
+              className={`
+                flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-display transition-all
+                ${!showAssignmentDescription
+                  ? 'bg-accent-primary text-background'
+                  : 'bg-surface/50 text-text-muted hover:bg-surface'
+                }
+              `}
+            >
+              <span>📝</span>
+              <span>SUBMISSION</span>
+            </button>
+            <button
+              onClick={() => setShowAssignmentDescription(true)}
+              disabled={!assignmentDescription}
+              className={`
+                flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-display transition-all
+                ${showAssignmentDescription
+                  ? 'bg-accent-primary text-background'
+                  : assignmentDescription
+                    ? 'bg-surface/50 text-text-muted hover:bg-surface'
+                    : 'bg-surface/30 text-text-muted/50 cursor-not-allowed'
+                }
+              `}
+            >
+              <span>📋</span>
+              <span>ASSIGNMENT</span>
+            </button>
+          </div>
+
+          {/* Submission Viewer or Assignment Description (Top) */}
           <div className="flex-1 border-b border-surface overflow-hidden">
-            <SubmissionViewer
-              submission={currentSubmission}
-              isLoading={isLoading}
-              onContentParsed={handleContentParsed}
-              onPDFPagesLoaded={handlePDFPagesLoaded}
-              batchAttachment={currentBatchAttachment}
-            />
+            {showAssignmentDescription && assignmentDescription ? (
+              <div className="h-full overflow-y-auto p-6 bg-surface/10">
+                <h2 className="font-display text-lg text-text-primary mb-4">
+                  {assignmentName}
+                </h2>
+                <div
+                  className="prose prose-invert prose-sm max-w-none
+                    prose-headings:font-display prose-headings:text-text-primary
+                    prose-p:text-text-primary prose-li:text-text-primary
+                    prose-strong:text-accent-primary
+                    prose-h2:text-lg prose-h3:text-base
+                    prose-ul:list-disc prose-ol:list-decimal"
+                  dangerouslySetInnerHTML={{ __html: assignmentDescription }}
+                />
+              </div>
+            ) : (
+              <SubmissionViewer
+                submission={currentSubmission}
+                isLoading={isLoading}
+                onContentParsed={handleContentParsed}
+                onPDFPagesLoaded={handlePDFPagesLoaded}
+                batchAttachment={currentBatchAttachment}
+              />
+            )}
           </div>
 
           {/* Feedback Composer (Bottom) */}
@@ -459,14 +691,14 @@ export function BattleScreen({
               currentGrades={currentGrades}
               currentFeedback={currentFeedback}
               onFeedbackChange={handleFeedbackChange}
-              onGenerateAI={handleGenerateAI}
-              isGenerating={isGeneratingFeedback}
+              onGenerateAI={handleGenerateAllFeedback}
+              isGenerating={isGeneratingAll}
             />
           </div>
         </div>
 
-        {/* Right Panel: Competency Scorer */}
-        <div className="w-80 border-l border-surface bg-surface/10">
+        {/* Right Panel: Competency Scorer - wider when student panel is closed */}
+        <div className={`border-l border-surface bg-surface/10 transition-all duration-300 ${isStudentPanelOpen ? 'w-80' : 'w-[36rem]'}`}>
           <CompetencyScorer
             grades={currentGrades}
             onGradeChange={handleGradeChange}

@@ -4,15 +4,23 @@
 // StreakBar - Top HUD showing XP, combo, streak, and session stats
 // =============================================================================
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getComboMultiplier, getStreakLabel, formatXP, formatTime } from '@/lib/game';
 import type { GameState } from '@/types';
+
+// XP popup queue entry
+interface XPPopupEntry {
+  id: number;
+  amount: number;
+  timestamp: number;
+}
 
 interface StreakBarProps {
   gameState: GameState;
   gradedCount: number;
   totalCount: number;
   onBack: () => void;
+  onToggleSound?: () => void;
   assignmentName?: string;
   courseName?: string;
 }
@@ -22,12 +30,14 @@ export function StreakBar({
   gradedCount,
   totalCount,
   onBack,
+  onToggleSound,
   assignmentName = 'Assignment',
   courseName = 'Course',
 }: StreakBarProps) {
   const [sessionTime, setSessionTime] = useState(0);
-  const [showXPPopup, setShowXPPopup] = useState(false);
+  const [xpQueue, setXpQueue] = useState<XPPopupEntry[]>([]);
   const [lastXP, setLastXP] = useState(gameState.sessionXP);
+  const popupIdRef = useRef(0);
 
   // Update session timer
   useEffect(() => {
@@ -37,15 +47,26 @@ export function StreakBar({
     return () => clearInterval(interval);
   }, [gameState.sessionStartTime]);
 
-  // Show XP popup when XP changes
+  // Add XP to queue when XP changes
   useEffect(() => {
     if (gameState.sessionXP > lastXP) {
-      setShowXPPopup(true);
-      const timeout = setTimeout(() => setShowXPPopup(false), 1000);
+      const delta = gameState.sessionXP - lastXP;
+      setXpQueue(prev => [...prev, {
+        id: ++popupIdRef.current,
+        amount: delta,
+        timestamp: Date.now(),
+      }]);
       setLastXP(gameState.sessionXP);
-      return () => clearTimeout(timeout);
     }
   }, [gameState.sessionXP, lastXP]);
+
+  // Clean old popups from queue
+  useEffect(() => {
+    const cleanup = setInterval(() => {
+      setXpQueue(prev => prev.filter(p => Date.now() - p.timestamp < 1500));
+    }, 100);
+    return () => clearInterval(cleanup);
+  }, []);
 
   const multiplier = getComboMultiplier(gameState.combo);
   const streakLabel = getStreakLabel(gameState.combo);
@@ -99,7 +120,7 @@ export function StreakBar({
           streakLabel={streakLabel}
         />
 
-        {/* XP Display */}
+        {/* XP Display with popup queue */}
         <div className="relative">
           <div className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-accent-gold/20 to-accent-primary/20 rounded-lg border border-accent-gold/30">
             <span className="text-lg">⚡</span>
@@ -107,16 +128,22 @@ export function StreakBar({
               {formatXP(gameState.sessionXP)} XP
             </span>
           </div>
-          {showXPPopup && (
-            <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-accent-primary font-display text-sm animate-bounce">
-              +{gameState.sessionXP - lastXP + (gameState.sessionXP - lastXP)}
+          {/* XP popup queue - renders multiple popups with vertical offset */}
+          {xpQueue.map((popup, index) => (
+            <div
+              key={popup.id}
+              className="absolute left-1/2 -translate-x-1/2 xp-popup pointer-events-none"
+              style={{ top: `${-24 - index * 28}px` }}
+            >
+              +{popup.amount}
             </div>
-          )}
+          ))}
         </div>
 
         {/* Sound Toggle */}
         <button
-          className="p-2 rounded-lg bg-surface/50 hover:bg-surface transition-colors text-lg"
+          onClick={onToggleSound}
+          className="p-2 rounded-lg bg-surface/50 hover:bg-surface transition-colors text-lg pixel-button"
           title={gameState.soundEnabled ? 'Mute sounds' : 'Enable sounds'}
         >
           {gameState.soundEnabled ? '🔊' : '🔇'}
@@ -154,10 +181,16 @@ function ComboDisplay({
     UNSTOPPABLE: 'text-accent-danger',
   };
 
+  // Determine combo glow intensity based on combo level
+  const comboGlowClass =
+    combo >= 10 ? 'combo-glow-high' :
+    combo >= 5 ? 'combo-glow-medium' :
+    'combo-glow-low';
+
   return (
     <div className="flex items-center gap-2">
-      {/* Combo Counter */}
-      <div className="flex items-center gap-1 px-3 py-1.5 bg-surface/50 rounded-lg">
+      {/* Combo Counter with glow effect */}
+      <div className={`flex items-center gap-1 px-3 py-1.5 bg-surface/50 rounded-lg ${comboGlowClass}`}>
         <span className="text-lg">🔥</span>
         <span className="text-lg font-display text-accent-primary">
           {combo}x
