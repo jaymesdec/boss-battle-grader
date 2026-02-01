@@ -9,8 +9,9 @@ import { COMPETENCIES } from '@/lib/competencies';
 // Context Template
 // -----------------------------------------------------------------------------
 
-export function generateContext(state: Partial<SessionState>): string {
-  const gradesFormatted = formatGrades(state.grades || {});
+export function generateContext(state?: Partial<SessionState>): string {
+  const safeState = state || {};
+  const gradesFormatted = formatGrades(safeState.grades || {});
   const competencyList = Object.values(COMPETENCIES)
     .map((c) => `${c.emoji} ${c.name}`)
     .join(', ');
@@ -27,12 +28,12 @@ student submissions by composing atomic tools in a loop.
 - Style: Encouraging but honest feedback
 
 ## Current Session
-- Course: ${state.courseName || 'Not selected'}${state.courseId ? ` (ID: ${state.courseId})` : ''}
-- Assignment: ${state.assignmentName || 'Not selected'}${state.assignmentId ? ` (ID: ${state.assignmentId})` : ''}
-- Student: ${state.studentName || 'Not selected'}${state.studentId ? ` (ID: ${state.studentId})` : ''}
-- Progress: ${state.gradedCount ?? 0} / ${state.totalCount ?? 0} graded
+- Course: ${safeState.courseName || 'Not selected'}${safeState.courseId ? ` (ID: ${safeState.courseId})` : ''}
+- Assignment: ${safeState.assignmentName || 'Not selected'}${safeState.assignmentId ? ` (ID: ${safeState.assignmentId})` : ''}
+- Student: ${safeState.studentName || 'Not selected'}${safeState.studentId ? ` (ID: ${safeState.studentId})` : ''}
+- Progress: ${safeState.gradedCount ?? 0} / ${safeState.totalCount ?? 0} graded
 - Competency grades so far: ${gradesFormatted || 'None assigned yet'}
-- Teacher's voice notes: ${state.teacherNotes || 'None provided'}
+- Teacher's voice notes: ${safeState.teacherNotes || 'None provided'}
 
 ## The 9 TD Competencies
 ${competencyList}
@@ -83,9 +84,9 @@ function formatGrades(grades: Partial<Record<CompetencyId, Grade>>): string {
 
 export function getSystemPromptForTask(
   taskType: string,
-  context: Partial<SessionState>
+  context?: Partial<SessionState>
 ): string {
-  const baseContext = generateContext(context);
+  const baseContext = generateContext(context || {});
 
   const taskInstructions: Record<string, string> = {
     generate_feedback: `

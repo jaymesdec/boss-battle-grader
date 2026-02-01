@@ -198,6 +198,12 @@ export interface FeedbackDraft {
   formattedFeedback: string;
 }
 
+export interface FeedbackInput {
+  text: string;
+  voiceNote?: Blob;
+  voiceDurationSeconds: number;
+}
+
 export interface FeedbackPair {
   id: string;
   assignmentId: number;
