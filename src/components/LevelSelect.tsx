@@ -21,21 +21,35 @@ type DungeonStatus = 'ungraded' | 'in_progress' | 'cleared' | 'no_submissions';
 
 function getDungeonStatus(assignment: CanvasAssignment): DungeonStatus {
   const summary = assignment.submission_summary;
-  if (!summary) return 'ungraded';
+  const needsGrading = assignment.needs_grading_count ?? 0;
+  const hasSubmissions = assignment.has_submitted_submissions ?? false;
 
-  const totalSubmitted = (summary.graded || 0) + (summary.ungraded || 0);
+  // If we have submission_summary, use it
+  if (summary) {
+    const totalSubmitted = (summary.graded || 0) + (summary.ungraded || 0);
 
-  if (totalSubmitted === 0 && summary.not_submitted > 0) {
+    if (totalSubmitted === 0 && summary.not_submitted > 0) {
+      return 'no_submissions';
+    }
+
+    if (needsGrading === 0 && totalSubmitted > 0) {
+      return 'cleared';
+    }
+    if (needsGrading < totalSubmitted && needsGrading > 0) {
+      return 'in_progress';
+    }
+    return 'ungraded';
+  }
+
+  // Fallback when submission_summary is null
+  // Use needs_grading_count and has_submitted_submissions
+  if (!hasSubmissions) {
     return 'no_submissions';
   }
-
-  // Use needs_grading_count for accurate status
-  const needsGrading = assignment.needs_grading_count ?? summary.ungraded ?? 0;
-
-  if (needsGrading === 0 && totalSubmitted > 0) {
+  if (needsGrading === 0) {
     return 'cleared';
   }
-  if (needsGrading < totalSubmitted && needsGrading > 0) {
+  if (needsGrading > 0) {
     return 'in_progress';
   }
   return 'ungraded';
@@ -205,11 +219,23 @@ export function LevelSelect({
                         <span>{statusConfig.icon}</span>
                         <span className="font-display">{statusConfig.label}</span>
                       </span>
-                    ) : (
+                    ) : needsGrading === 0 ? (
+                      <span className="flex items-center gap-1 text-green-400">
+                        <span>✅</span>
+                        <span className="font-display">ALL GRADED</span>
+                      </span>
+                    ) : totalCount > 0 ? (
                       <span className={`flex items-center gap-1 ${statusConfig.color}`}>
                         <span>{statusConfig.icon}</span>
                         <span className="font-display">
                           {gradedCount}/{totalCount} GRADED
+                        </span>
+                      </span>
+                    ) : (
+                      <span className={`flex items-center gap-1 ${statusConfig.color}`}>
+                        <span>{statusConfig.icon}</span>
+                        <span className="font-display">
+                          {needsGrading} NEED GRADING
                         </span>
                       </span>
                     )}

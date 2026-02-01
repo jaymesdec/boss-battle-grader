@@ -84,6 +84,7 @@ export interface CanvasAssignment {
     title: string;
   };
   needs_grading_count?: number;
+  has_submitted_submissions?: boolean;
   submission_summary?: {
     graded: number;
     ungraded: number;
