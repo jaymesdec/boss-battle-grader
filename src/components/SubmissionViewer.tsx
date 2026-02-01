@@ -368,6 +368,7 @@ function ContentDisplay({
   const isImage = source.contentType.startsWith('image/');
   const isPdf = source.contentType === 'application/pdf';
   const isNotebook = source.name.endsWith('.ipynb');
+  const isPythonScript = source.name.endsWith('.py');
   const isDocument = source.contentType.includes('word') ||
                      source.contentType.includes('document') ||
                      source.name.endsWith('.docx') ||
@@ -406,6 +407,16 @@ function ContentDisplay({
   if (isNotebook) {
     return (
       <NotebookDisplay
+        url={source.url}
+        filename={source.name}
+        onContentParsed={onContentParsed}
+      />
+    );
+  }
+
+  if (isPythonScript) {
+    return (
+      <ScriptDisplay
         url={source.url}
         filename={source.name}
         onContentParsed={onContentParsed}
@@ -656,6 +667,91 @@ function NotebookDisplay({
       <div className="p-2 bg-surface/30 rounded-lg">
         <p className="text-xs text-text-muted text-center">
           📓 AI can see all notebook cells when generating feedback
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Script Display Component (for .py files)
+// =============================================================================
+
+function ScriptDisplay({
+  url,
+  filename,
+  onContentParsed,
+}: {
+  url: string;
+  filename: string;
+  onContentParsed?: (content: string) => void;
+}) {
+  const [scriptContent, setScriptContent] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadScript() {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error('Failed to fetch script');
+        }
+        const content = await response.text();
+        setScriptContent(content);
+        // Notify parent so AI can use this content
+        onContentParsed?.(content);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load script');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadScript();
+  }, [url, onContentParsed]);
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8">
+        <div className="animate-spin text-4xl mb-4">🐍</div>
+        <p className="text-text-muted text-sm">Loading script...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 bg-accent-danger/20 rounded-lg">
+        <p className="text-accent-danger">{error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 p-4 bg-surface rounded-lg">
+        <span className="text-4xl">🐍</span>
+        <div>
+          <p className="text-text-primary font-display">{filename}</p>
+          <p className="text-text-muted text-sm">Python Script</p>
+        </div>
+      </div>
+
+      {scriptContent && (
+        <div className="p-4 bg-surface/50 rounded-lg max-h-[500px] overflow-auto">
+          <h4 className="text-xs font-display text-text-muted mb-2">SCRIPT CONTENT</h4>
+          <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
+            <code>{scriptContent}</code>
+          </pre>
+        </div>
+      )}
+
+      <div className="p-2 bg-surface/30 rounded-lg">
+        <p className="text-xs text-text-muted text-center">
+          🐍 AI can see the full script when generating feedback
         </p>
       </div>
     </div>
