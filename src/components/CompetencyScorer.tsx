@@ -90,13 +90,13 @@ export function CompetencyScorer({
           </div>
         )}
 
-        {/* Progress Header */}
+        {/* Progress - show label only when there's no toggle */}
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-sm text-text-muted">
-            {mode === 'competencies' ? 'COMPETENCIES' : 'RUBRIC CRITERIA'}
-          </h3>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted">{gradedCount}/{totalCount}</span>
+          {!hasRubric && (
+            <h3 className="font-display text-sm text-text-muted">COMPETENCIES</h3>
+          )}
+          <div className={`flex items-center gap-2 ${hasRubric ? 'ml-auto' : ''}`}>
+            <span className="text-sm font-display text-text-muted">{gradedCount}/{totalCount}</span>
             {allGraded && <span className="text-accent-primary">✓</span>}
           </div>
         </div>
