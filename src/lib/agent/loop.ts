@@ -13,11 +13,22 @@ import type { SessionState, AgentTaskType } from '@/types';
 // Types
 // -----------------------------------------------------------------------------
 
+// PDF image formatted for Claude's vision API
+interface PDFImageForAI {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg';
+    data: string;
+  };
+}
+
 interface AgentLoopConfig {
   task: AgentTaskType;
   userMessage: string;
   context: Partial<SessionState>;
   maxIterations?: number;
+  pdfImages?: PDFImageForAI[];
   onToolCall?: (toolName: string, input: Record<string, unknown>) => void;
   onToolResult?: (toolName: string, result: string) => void;
 }
@@ -40,6 +51,7 @@ export async function runAgentLoop(config: AgentLoopConfig): Promise<AgentLoopRe
     userMessage,
     context,
     maxIterations = 10,
+    pdfImages,
     onToolCall,
     onToolResult,
   } = config;
@@ -57,9 +69,45 @@ export async function runAgentLoop(config: AgentLoopConfig): Promise<AgentLoopRe
     input_schema: tool.input_schema as Anthropic.Tool.InputSchema,
   }));
 
+  // Build user message content - include images if provided for vision analysis
+  const userContent: Anthropic.ContentBlockParam[] = [];
+
+  // Add PDF images first so Claude sees the visual content
+  if (pdfImages && pdfImages.length > 0) {
+    userContent.push({
+      type: 'text',
+      text: `I'm providing ${pdfImages.length} slide images from the student's PDF submission for your visual analysis:\n`,
+    });
+
+    for (let i = 0; i < pdfImages.length; i++) {
+      userContent.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: pdfImages[i].source.data,
+        },
+      });
+      userContent.push({
+        type: 'text',
+        text: `[Slide ${i + 1}]`,
+      });
+    }
+
+    userContent.push({
+      type: 'text',
+      text: '\n\n' + userMessage,
+    });
+  } else {
+    userContent.push({
+      type: 'text',
+      text: userMessage,
+    });
+  }
+
   // Initialize message history
   const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: userMessage },
+    { role: 'user', content: userContent },
   ];
 
   // Context provider for read_context tool

@@ -1,10 +1,10 @@
 'use client';
 
 // =============================================================================
-// FeedbackComposer - Text and voice feedback with AI assistance
+// FeedbackComposer - Text feedback with AI assistance
 // =============================================================================
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import type { FeedbackInput, CompetencyId, Grade } from '@/types';
 
 interface FeedbackComposerProps {
@@ -18,87 +18,24 @@ interface FeedbackComposerProps {
 
 export function FeedbackComposer({
   studentName,
-  submissionContent,
   currentGrades,
   onFeedbackChange,
   onGenerateAI,
   isGenerating = false,
 }: FeedbackComposerProps) {
   const [textFeedback, setTextFeedback] = useState('');
-  const [voiceNote, setVoiceNote] = useState<Blob | null>(null);
-  const [voiceDuration, setVoiceDuration] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Update parent when feedback changes
   useEffect(() => {
     onFeedbackChange({
       text: textFeedback,
-      voiceNote: voiceNote || undefined,
-      voiceDurationSeconds: voiceDuration,
+      voiceDurationSeconds: 0,
     });
-  }, [textFeedback, voiceNote, voiceDuration, onFeedbackChange]);
-
-  // Start voice recording
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setVoiceNote(blob);
-        setVoiceDuration(recordingTime);
-        stream.getTracks().forEach((track) => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setRecordingTime(0);
-
-      // Start timer
-      timerRef.current = setInterval(() => {
-        setRecordingTime((t) => t + 1);
-      }, 1000);
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      alert('Could not access microphone. Please check permissions.');
-    }
-  }, [recordingTime]);
-
-  // Stop voice recording
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-  }, [isRecording]);
-
-  // Clear voice note
-  const clearVoiceNote = useCallback(() => {
-    setVoiceNote(null);
-    setVoiceDuration(0);
-  }, []);
+  }, [textFeedback, onFeedbackChange]);
 
   // Count graded competencies
   const gradedCount = Object.keys(currentGrades).length;
-  const hasContent = textFeedback.trim().length > 0 || voiceNote !== null;
+  const hasContent = textFeedback.trim().length > 0;
 
   return (
     <div className="h-full flex flex-col p-4">
@@ -127,60 +64,6 @@ export function FeedbackComposer({
                      text-text-primary placeholder-text-muted text-sm resize-none
                      focus:outline-none focus:border-accent-primary transition-colors"
         />
-      </div>
-
-      {/* Voice Recording Section */}
-      <div className="flex items-center gap-3 mb-3">
-        {!isRecording && !voiceNote && (
-          <button
-            onClick={startRecording}
-            className="flex items-center gap-2 px-4 py-2 bg-surface rounded-lg
-                       hover:bg-surface/80 transition-colors text-text-primary"
-          >
-            <span className="text-accent-danger">🎙️</span>
-            <span className="text-sm">Record Voice Note</span>
-          </button>
-        )}
-
-        {isRecording && (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 bg-accent-danger rounded-full animate-pulse" />
-              <span className="text-sm text-text-primary font-mono">
-                {formatTime(recordingTime)}
-              </span>
-            </div>
-            <button
-              onClick={stopRecording}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-danger/20
-                         border border-accent-danger rounded-lg text-accent-danger
-                         hover:bg-accent-danger/30 transition-colors"
-            >
-              <span>⏹️</span>
-              <span className="text-sm">Stop Recording</span>
-            </button>
-          </div>
-        )}
-
-        {voiceNote && !isRecording && (
-          <div className="flex items-center gap-3 flex-1">
-            <div className="flex items-center gap-2 px-3 py-2 bg-accent-primary/20
-                            border border-accent-primary rounded-lg">
-              <span>🎵</span>
-              <span className="text-sm text-accent-primary">
-                Voice note ({formatTime(voiceDuration)})
-              </span>
-            </div>
-            <AudioPlayer audioBlob={voiceNote} />
-            <button
-              onClick={clearVoiceNote}
-              className="p-2 text-text-muted hover:text-accent-danger transition-colors"
-              title="Delete voice note"
-            >
-              🗑️
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Action Buttons */}
@@ -220,52 +103,6 @@ export function FeedbackComposer({
         </p>
       )}
     </div>
-  );
-}
-
-// =============================================================================
-// Audio Player
-// =============================================================================
-
-function AudioPlayer({ audioBlob }: { audioBlob: Blob }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const urlRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    urlRef.current = URL.createObjectURL(audioBlob);
-    return () => {
-      if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current);
-      }
-    };
-  }, [audioBlob]);
-
-  const togglePlay = () => {
-    if (!audioRef.current && urlRef.current) {
-      audioRef.current = new Audio(urlRef.current);
-      audioRef.current.onended = () => setIsPlaying(false);
-    }
-
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  return (
-    <button
-      onClick={togglePlay}
-      className="p-2 text-text-primary hover:text-accent-primary transition-colors"
-      title={isPlaying ? 'Stop' : 'Play'}
-    >
-      {isPlaying ? '⏹️' : '▶️'}
-    </button>
   );
 }
 
@@ -338,12 +175,3 @@ function FeedbackTemplates({ onSelect }: { onSelect: (template: string) => void 
   );
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}

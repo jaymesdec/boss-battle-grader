@@ -10,11 +10,31 @@ import type { AgentTaskType, SessionState } from '@/types';
 // Types
 // -----------------------------------------------------------------------------
 
+// Type for PDF images formatted for Claude's vision API
+interface PDFImageForAI {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: 'image/jpeg';
+    data: string;
+  };
+}
+
 interface AgentRequest {
   task: AgentTaskType;
   prompt?: string;
   context: Partial<SessionState>;
   stream?: boolean;
+  // Direct fields for simplified API (used by frontend)
+  studentName?: string;
+  grades?: Record<string, string>;
+  submissionContent?: string;
+  pdfImages?: PDFImageForAI[];
+  courseId?: number;
+  assignmentId?: number;
+  userId?: number;
+  score?: number;
+  comment?: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -33,24 +53,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Merge direct fields into context for backwards compatibility
+    const mergedContext: Partial<SessionState> = {
+      ...body.context,
+      studentName: body.studentName || body.context?.studentName,
+      grades: body.grades || body.context?.grades,
+      courseId: body.courseId || body.context?.courseId,
+      assignmentId: body.assignmentId || body.context?.assignmentId,
+    };
+
     // Build user message based on task type
-    const userMessage = buildUserMessage(body.task, body.prompt, body.context);
+    const userMessage = buildUserMessage(body.task, body.prompt, mergedContext, body.submissionContent);
 
     // Check if streaming is requested
     if (body.stream) {
-      return streamResponse(body.task, userMessage, body.context);
+      return streamResponse(body.task, userMessage, mergedContext, body.pdfImages);
     }
 
-    // Run non-streaming agent loop
+    // Run non-streaming agent loop with PDF images for vision
     const result = await runAgentLoop({
       task: body.task,
       userMessage,
-      context: body.context,
+      context: mergedContext,
+      pdfImages: body.pdfImages,
     });
 
     return NextResponse.json({
       success: result.success,
       result: result.result,
+      feedback: result.result, // Alias for generate_feedback task
       toolsUsed: result.toolsUsed,
       iterations: result.iterations,
       error: result.error,
@@ -73,7 +104,8 @@ export async function POST(request: NextRequest) {
 async function streamResponse(
   task: AgentTaskType,
   userMessage: string,
-  context: Partial<SessionState>
+  context: Partial<SessionState>,
+  pdfImages?: PDFImageForAI[]
 ) {
   const encoder = new TextEncoder();
 
@@ -121,7 +153,8 @@ async function streamResponse(
 function buildUserMessage(
   task: AgentTaskType,
   customPrompt: string | undefined,
-  context: Partial<SessionState>
+  context: Partial<SessionState>,
+  submissionContent?: string
 ): string {
   if (customPrompt) {
     return customPrompt;
@@ -135,7 +168,10 @@ ${context.teacherNotes ? `Teacher's notes: ${context.teacherNotes}` : 'No specif
 
 Competency grades assigned: ${JSON.stringify(context.grades || {})}
 
-Please read the submission content and generate appropriate feedback.`;
+${submissionContent ? `Submission content:\n${submissionContent}\n` : ''}
+Note: If PDF slide images are attached, analyze them visually to provide specific feedback on the student's work.
+
+Please generate encouraging but honest feedback referencing specific parts of the submission.`;
 
     case 'surface_highlights':
       return `Analyze the grading session for ${context.courseName || 'this course'} and surface interesting highlights about student performance.

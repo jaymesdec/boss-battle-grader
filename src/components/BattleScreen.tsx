@@ -8,7 +8,8 @@ import { useState, useReducer, useCallback, useEffect } from 'react';
 import { StreakBar } from './StreakBar';
 import { StudentQueue } from './StudentQueue';
 import { CharacterCard } from './CharacterCard';
-import { SubmissionViewer } from './SubmissionViewer';
+import { SubmissionViewer, type PDFImageForAI } from './SubmissionViewer';
+import type { PDFPage } from './PDFViewer';
 import { FeedbackComposer } from './FeedbackComposer';
 import { CompetencyScorer } from './CompetencyScorer';
 import {
@@ -23,7 +24,14 @@ import type {
   CompetencyId,
   Grade,
   FeedbackInput,
+  CanvasRubric,
 } from '@/types';
+
+interface RubricScore {
+  criterionId: string;
+  ratingId: string;
+  points: number;
+}
 
 interface BattleScreenProps {
   courseId: number;
@@ -31,6 +39,7 @@ interface BattleScreenProps {
   assignmentId: number;
   assignmentName: string;
   submissions: CanvasSubmission[];
+  rubric?: CanvasRubric[];
   onBack: () => void;
 }
 
@@ -40,6 +49,7 @@ export function BattleScreen({
   assignmentId,
   assignmentName,
   submissions,
+  rubric,
   onBack,
 }: BattleScreenProps) {
   // Game state
@@ -50,8 +60,11 @@ export function BattleScreen({
     submissions.length > 0 ? submissions[0].user_id : null
   );
 
-  // Grades for current submission
+  // Grades for current submission (competency mode)
   const [currentGrades, setCurrentGrades] = useState<Partial<Record<CompetencyId, Grade>>>({});
+
+  // Rubric scores for current submission (rubric mode)
+  const [rubricScores, setRubricScores] = useState<Record<string, RubricScore>>({});
 
   // Feedback for current submission
   const [currentFeedback, setCurrentFeedback] = useState<FeedbackInput>({
@@ -69,6 +82,9 @@ export function BattleScreen({
 
   // Parsed submission content
   const [parsedContent, setParsedContent] = useState<string>('');
+
+  // PDF images for AI vision analysis
+  const [pdfImages, setPdfImages] = useState<PDFImageForAI[]>([]);
 
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
@@ -94,8 +110,18 @@ export function BattleScreen({
   const handleSelectStudent = useCallback((userId: number) => {
     setCurrentUserId(userId);
     setCurrentGrades({});
+    setRubricScores({});
     setCurrentFeedback({ text: '', voiceDurationSeconds: 0 });
     setParsedContent('');
+    setPdfImages([]);
+  }, []);
+
+  // Handle PDF pages loaded - store for AI vision
+  const handlePDFPagesLoaded = useCallback((pages: PDFPage[], aiImages: PDFImageForAI[]) => {
+    setPdfImages(aiImages);
+    // Create a text summary of the PDF for text-based context
+    const pagesSummary = `[PDF with ${pages.length} slides loaded for AI vision analysis]`;
+    setParsedContent(pagesSummary);
   }, []);
 
   // Handle grade change
@@ -125,6 +151,33 @@ export function BattleScreen({
     });
   }, [gameState.combo]);
 
+  // Handle rubric score change
+  const handleRubricScoreChange = useCallback((criterionId: string, score: RubricScore | null) => {
+    setRubricScores((prev) => {
+      if (score === null) {
+        const { [criterionId]: _, ...rest } = prev;
+        return rest;
+      }
+
+      const isNewScore = !prev[criterionId];
+      if (isNewScore) {
+        // Award points for scoring a rubric criterion
+        const points = calculatePoints({ type: 'grade_competency' }, gameState.combo);
+        dispatch({ type: 'ADD_XP', points: points.total });
+        dispatch({ type: 'INCREMENT_COMBO' });
+
+        // Check if all criteria are now scored
+        const newScores = { ...prev, [criterionId]: score };
+        if (rubric && Object.keys(newScores).length === rubric.length) {
+          const bonusPoints = calculatePoints({ type: 'complete_all_9' }, gameState.combo);
+          dispatch({ type: 'ADD_XP', points: bonusPoints.total });
+        }
+      }
+
+      return { ...prev, [criterionId]: score };
+    });
+  }, [gameState.combo, rubric]);
+
   // Handle feedback change
   const handleFeedbackChange = useCallback((feedback: FeedbackInput) => {
     setCurrentFeedback(feedback);
@@ -144,6 +197,8 @@ export function BattleScreen({
           studentName: currentStudent?.displayName || 'Student',
           grades: currentGrades,
           submissionContent: parsedContent || currentSubmission?.body || '',
+          // Include PDF images for vision analysis if available
+          pdfImages: pdfImages.length > 0 ? pdfImages : undefined,
         }),
       });
 
@@ -163,7 +218,7 @@ export function BattleScreen({
     } finally {
       setIsGeneratingFeedback(false);
     }
-  }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo]);
+  }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo, pdfImages]);
 
   // Post grades to Canvas
   const handlePostToCanvas = useCallback(async () => {
@@ -287,6 +342,7 @@ export function BattleScreen({
               submission={currentSubmission}
               isLoading={isLoading}
               onContentParsed={handleContentParsed}
+              onPDFPagesLoaded={handlePDFPagesLoaded}
             />
           </div>
 
@@ -308,9 +364,15 @@ export function BattleScreen({
           <CompetencyScorer
             grades={currentGrades}
             onGradeChange={handleGradeChange}
+            rubric={rubric}
+            rubricScores={rubricScores}
+            onRubricScoreChange={handleRubricScoreChange}
             onPostToCanvas={handlePostToCanvas}
             isPosting={isPosting}
-            canPost={Object.keys(currentGrades).length === 9}
+            canPost={
+              Object.keys(currentGrades).length === 9 ||
+              (rubric && Object.keys(rubricScores).length === rubric.length)
+            }
           />
         </div>
       </div>

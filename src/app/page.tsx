@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { BattleScreen } from '@/components/BattleScreen';
-import type { CanvasCourse, CanvasAssignment, CanvasSubmission } from '@/types';
+import type { CanvasCourse, CanvasAssignment, CanvasSubmission, CanvasRubric } from '@/types';
 
 type Screen = 'hub' | 'level' | 'battle';
 
@@ -42,9 +42,17 @@ function getDemoSubmissions(): CanvasSubmission[] {
       score: null,
       grade: null,
       url: null,
-      submission_type: 'online_text_entry',
+      submission_type: 'online_upload',
       body: '<p>My project focuses on improving accessibility in our school building for students with mobility challenges.</p><p>Through empathy mapping and interviews, I discovered several pain points in daily navigation. The prototype I created is a digital wayfinding app with AR features.</p>',
-      attachments: [],
+      attachments: [
+        {
+          id: 2001,
+          filename: 'Design_Thinking_Presentation.pdf',
+          url: 'https://www.w3.org/WAI/WCAG21/Techniques/pdf/img/table-word.pdf',
+          content_type: 'application/pdf',
+          size: 150000,
+        },
+      ],
     },
     {
       id: 1003,
@@ -94,6 +102,60 @@ function getDemoSubmissions(): CanvasSubmission[] {
   ];
 }
 
+// Demo rubric for testing
+function getDemoRubric(): CanvasRubric[] {
+  return [
+    {
+      id: 'criterion_1',
+      description: 'Research & Problem Definition',
+      long_description: 'How well did the student identify and define the problem through research?',
+      points: 25,
+      ratings: [
+        { id: 'r1_1', description: 'Exceptional', long_description: 'Deep research with primary sources, clear problem definition', points: 25 },
+        { id: 'r1_2', description: 'Proficient', long_description: 'Solid research, well-defined problem', points: 20 },
+        { id: 'r1_3', description: 'Developing', long_description: 'Basic research, problem somewhat clear', points: 15 },
+        { id: 'r1_4', description: 'Beginning', long_description: 'Limited research, unclear problem', points: 10 },
+      ],
+    },
+    {
+      id: 'criterion_2',
+      description: 'Design Process',
+      long_description: 'Evidence of iterative design thinking and prototyping',
+      points: 25,
+      ratings: [
+        { id: 'r2_1', description: 'Exceptional', long_description: 'Multiple iterations with clear improvements', points: 25 },
+        { id: 'r2_2', description: 'Proficient', long_description: 'Good iteration, visible progress', points: 20 },
+        { id: 'r2_3', description: 'Developing', long_description: 'Some iteration, limited improvements', points: 15 },
+        { id: 'r2_4', description: 'Beginning', long_description: 'Minimal iteration or process', points: 10 },
+      ],
+    },
+    {
+      id: 'criterion_3',
+      description: 'Final Solution',
+      long_description: 'Quality and feasibility of the proposed solution',
+      points: 25,
+      ratings: [
+        { id: 'r3_1', description: 'Exceptional', long_description: 'Innovative, feasible, well-executed', points: 25 },
+        { id: 'r3_2', description: 'Proficient', long_description: 'Solid solution, mostly feasible', points: 20 },
+        { id: 'r3_3', description: 'Developing', long_description: 'Basic solution, some feasibility issues', points: 15 },
+        { id: 'r3_4', description: 'Beginning', long_description: 'Incomplete or impractical solution', points: 10 },
+      ],
+    },
+    {
+      id: 'criterion_4',
+      description: 'Presentation & Communication',
+      long_description: 'Clarity of presentation and documentation',
+      points: 25,
+      ratings: [
+        { id: 'r4_1', description: 'Exceptional', long_description: 'Clear, engaging, professional presentation', points: 25 },
+        { id: 'r4_2', description: 'Proficient', long_description: 'Good presentation, well organized', points: 20 },
+        { id: 'r4_3', description: 'Developing', long_description: 'Adequate presentation, some gaps', points: 15 },
+        { id: 'r4_4', description: 'Beginning', long_description: 'Unclear or incomplete presentation', points: 10 },
+      ],
+    },
+  ];
+}
+
 export default function Home() {
   const [screen, setScreen] = useState<Screen>('hub');
   const [courses, setCourses] = useState<CanvasCourse[]>([]);
@@ -101,6 +163,7 @@ export default function Home() {
   const [assignments, setAssignments] = useState<CanvasAssignment[]>([]);
   const [selectedAssignment, setSelectedAssignment] = useState<CanvasAssignment | null>(null);
   const [submissions, setSubmissions] = useState<CanvasSubmission[]>([]);
+  const [rubric, setRubric] = useState<CanvasRubric[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -166,6 +229,7 @@ export default function Home() {
     // Use demo data if in demo mode
     if (selectedCourse.id === 0) {
       setSubmissions(getDemoSubmissions());
+      setRubric(getDemoRubric());
       setIsLoading(false);
       return;
     }
@@ -214,6 +278,7 @@ export default function Home() {
         assignmentId={selectedAssignment.id}
         assignmentName={selectedAssignment.name}
         submissions={submissions}
+        rubric={rubric}
         onBack={handleBack}
       />
     );

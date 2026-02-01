@@ -4,23 +4,35 @@
 // SubmissionViewer - Display student submission content with tabs
 // =============================================================================
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
 import type { CanvasSubmission } from '@/types';
+
+// Type for PDF images formatted for Claude's vision API
+export type PDFImageForAI = ReturnType<typeof getPDFImagesForAI>[number];
 
 interface SubmissionViewerProps {
   submission: CanvasSubmission | null;
   isLoading?: boolean;
   onContentParsed?: (content: string) => void;
+  onPDFPagesLoaded?: (pages: PDFPage[], aiImages: PDFImageForAI[]) => void;
 }
 
 export function SubmissionViewer({
   submission,
   isLoading = false,
   onContentParsed,
+  onPDFPagesLoaded,
 }: SubmissionViewerProps) {
   const [activeTab, setActiveTab] = useState(0);
   const [parsedContent, setParsedContent] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+
+  // Handle PDF pages loaded - convert to AI format and notify parent
+  const handlePDFPagesLoaded = useCallback((pages: PDFPage[]) => {
+    const aiImages = getPDFImagesForAI(pages);
+    onPDFPagesLoaded?.(pages, aiImages);
+  }, [onPDFPagesLoaded]);
 
   if (isLoading) {
     return (
@@ -150,6 +162,7 @@ export function SubmissionViewer({
           source={activeSource}
           parsedContent={parsedContent}
           isParsing={isParsing}
+          onPDFPagesLoaded={handlePDFPagesLoaded}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -205,11 +218,13 @@ function ContentDisplay({
   parsedContent,
   isParsing,
   onParse,
+  onPDFPagesLoaded,
 }: {
   source: ContentSource;
   parsedContent: string | null;
   isParsing: boolean;
   onParse: () => void;
+  onPDFPagesLoaded?: (pages: PDFPage[]) => void;
 }) {
   if (source.type === 'text') {
     return (
@@ -266,29 +281,17 @@ function ContentDisplay({
 
   if (isPdf) {
     return (
-      <div className="space-y-4">
-        <iframe
-          src={source.url}
-          className="w-full h-[500px] rounded-lg border border-surface"
-          title={source.name}
+      <div className="h-full flex flex-col">
+        <PDFViewer
+          url={source.url}
+          onPagesLoaded={onPDFPagesLoaded}
+          onError={(err) => console.error('PDF load error:', err)}
         />
-        {!parsedContent && (
-          <button
-            onClick={onParse}
-            disabled={isParsing}
-            className="px-4 py-2 bg-accent-primary text-background rounded-lg text-sm hover:bg-accent-primary/80 transition-colors disabled:opacity-50"
-          >
-            {isParsing ? 'Parsing...' : '📖 Extract Text for AI Analysis'}
-          </button>
-        )}
-        {parsedContent && (
-          <div className="p-4 bg-surface/50 rounded-lg">
-            <h4 className="text-xs font-display text-text-muted mb-2">EXTRACTED TEXT</h4>
-            <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
-              {parsedContent}
-            </pre>
-          </div>
-        )}
+        <div className="mt-2 p-2 bg-surface/30 rounded-lg">
+          <p className="text-xs text-text-muted text-center">
+            📸 AI can see all slides when generating feedback
+          </p>
+        </div>
       </div>
     );
   }
