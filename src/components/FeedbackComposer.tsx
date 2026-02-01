@@ -11,6 +11,7 @@ interface FeedbackComposerProps {
   studentName: string;
   submissionContent?: string;
   currentGrades: Partial<Record<CompetencyId, Grade>>;
+  currentFeedback: FeedbackInput;
   onFeedbackChange: (feedback: FeedbackInput) => void;
   onGenerateAI: () => void;
   isGenerating?: boolean;
@@ -19,19 +20,27 @@ interface FeedbackComposerProps {
 export function FeedbackComposer({
   studentName,
   currentGrades,
+  currentFeedback,
   onFeedbackChange,
   onGenerateAI,
   isGenerating = false,
 }: FeedbackComposerProps) {
-  const [textFeedback, setTextFeedback] = useState('');
+  const [textFeedback, setTextFeedback] = useState(currentFeedback.text);
 
-  // Update parent when feedback changes
+  // Sync with parent when currentFeedback changes (e.g., student switch or AI generation)
   useEffect(() => {
-    onFeedbackChange({
-      text: textFeedback,
-      voiceDurationSeconds: 0,
-    });
-  }, [textFeedback, onFeedbackChange]);
+    setTextFeedback(currentFeedback.text);
+  }, [currentFeedback.text]);
+
+  // Update parent when local feedback changes
+  useEffect(() => {
+    if (textFeedback !== currentFeedback.text) {
+      onFeedbackChange({
+        text: textFeedback,
+        voiceDurationSeconds: 0,
+      });
+    }
+  }, [textFeedback, currentFeedback.text, onFeedbackChange]);
 
   // Count graded competencies
   const gradedCount = Object.keys(currentGrades).length;

@@ -98,6 +98,21 @@ function getDemoSubmissions(): CanvasSubmission[] {
       submission_type: 'online_text_entry',
       body: '<p>My Design Thinking project addressed mental health support for teenagers. I created a peer support app concept with anonymous check-ins and resource matching.</p><p>The iterative design process included three rounds of user testing with real students, leading to significant improvements in the UI and feature set.</p>',
       attachments: [],
+      rubric_assessment: {
+        criterion_1: { points: 20, rating_id: 'r1_2', comments: '' },
+        criterion_2: { points: 25, rating_id: 'r2_1', comments: '' },
+        criterion_3: { points: 20, rating_id: 'r3_2', comments: '' },
+        criterion_4: { points: 20, rating_id: 'r4_2', comments: '' },
+      },
+      submission_comments: [
+        {
+          id: 5001,
+          author_id: 1, // Teacher
+          author_name: 'Jaymes Dec',
+          comment: 'Great work on the mental health app concept, Taylor! Your user research was thorough and the iterative design process shows real maturity. Consider adding more detail about your testing methodology in future projects.',
+          created_at: '2026-01-28T10:30:00Z',
+        },
+      ],
     },
   ];
 }

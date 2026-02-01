@@ -35,6 +35,7 @@ interface AgentRequest {
   userId?: number;
   score?: number;
   comment?: string;
+  existingCommentId?: number; // For updating existing comments
 }
 
 // -----------------------------------------------------------------------------

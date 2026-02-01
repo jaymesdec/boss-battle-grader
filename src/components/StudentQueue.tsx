@@ -11,6 +11,7 @@ interface StudentQueueProps {
   submissions: CanvasSubmission[];
   currentUserId: number | null;
   gradedIds: Set<number>;
+  batchUploadedIds: Set<number>;
   onSelect: (userId: number) => void;
 }
 
@@ -18,6 +19,7 @@ export function StudentQueue({
   submissions,
   currentUserId,
   gradedIds,
+  batchUploadedIds,
   onSelect,
 }: StudentQueueProps) {
   if (submissions.length === 0) {
@@ -35,7 +37,9 @@ export function StudentQueue({
       </h3>
       {submissions.map((submission) => {
         const isSelected = submission.user_id === currentUserId;
-        const isGraded = gradedIds.has(submission.user_id);
+        const isGraded = gradedIds.has(submission.user_id) || submission.score !== null;
+        const hasBatchPdf = batchUploadedIds.has(submission.user_id);
+        const isSubmitted = !!submission.submitted_at;
         const studentName = submission.user?.name || `Student ${submission.user_id}`;
         const avatarUrl = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(
           studentName
@@ -69,18 +73,12 @@ export function StudentQueue({
             </div>
             <div className="flex-1 min-w-0 text-left">
               <p className="text-sm text-text-primary truncate">{studentName}</p>
-              <p className="text-xs text-text-muted">
-                {submission.late && <span className="text-accent-danger">Late • </span>}
-                {submission.submitted_at
-                  ? `Attempt ${submission.attempt}`
-                  : 'Not submitted'}
-              </p>
+              <StudentStatus
+                isSubmitted={isSubmitted}
+                isGraded={isGraded}
+                hasBatchPdf={hasBatchPdf}
+              />
             </div>
-            <StatusIndicator
-              submitted={!!submission.submitted_at}
-              graded={isGraded}
-              hasScore={submission.score !== null}
-            />
           </button>
         );
       })}
@@ -89,23 +87,46 @@ export function StudentQueue({
 }
 
 // =============================================================================
-// Status Indicator
+// Student Status - Shows submission and grading status
 // =============================================================================
 
-function StatusIndicator({
-  submitted,
-  graded,
-  hasScore,
+function StudentStatus({
+  isSubmitted,
+  isGraded,
+  hasBatchPdf,
 }: {
-  submitted: boolean;
-  graded: boolean;
-  hasScore: boolean;
+  isSubmitted: boolean;
+  isGraded: boolean;
+  hasBatchPdf: boolean;
 }) {
-  if (graded || hasScore) {
-    return <span className="text-accent-primary">✅</span>;
+  // Build status badges
+  const badges: Array<{ text: string; icon: string; color: string }> = [];
+
+  if (!isSubmitted && !hasBatchPdf) {
+    badges.push({ text: 'Not submitted', icon: '⚫', color: 'text-text-muted' });
+  } else {
+    if (isGraded) {
+      badges.push({ text: 'Graded', icon: '✓', color: 'text-accent-primary' });
+    } else if (isSubmitted) {
+      badges.push({ text: 'Needs grading', icon: '●', color: 'text-accent-gold' });
+    }
+
+    if (hasBatchPdf) {
+      badges.push({ text: 'PDF', icon: '📄', color: 'text-accent-secondary' });
+    }
   }
-  if (submitted) {
-    return <span className="text-accent-gold">🔴</span>;
-  }
-  return <span className="text-text-muted">⚫</span>;
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {badges.map((badge, i) => (
+        <span
+          key={i}
+          className={`inline-flex items-center gap-0.5 text-xs ${badge.color}`}
+        >
+          <span>{badge.icon}</span>
+          <span>{badge.text}</span>
+        </span>
+      ))}
+    </div>
+  );
 }

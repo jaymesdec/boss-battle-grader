@@ -92,6 +92,9 @@ export function BattleScreen({
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [batchAttachments, setBatchAttachments] = useState<Map<number, BatchAttachment>>(new Map());
 
+  // Track existing comment ID for updating instead of creating new
+  const [existingCommentId, setExistingCommentId] = useState<number | null>(null);
+
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
   const studentName = currentSubmission?.user?.name || `Student ${currentSubmission?.user_id || 0}`;
@@ -115,11 +118,48 @@ export function BattleScreen({
   // Handle student selection
   const handleSelectStudent = useCallback((userId: number) => {
     setCurrentUserId(userId);
-    setCurrentGrades({});
-    setRubricScores({});
-    setCurrentFeedback({ text: '', voiceDurationSeconds: 0 });
     setParsedContent('');
     setPdfImages([]);
+
+    // Find the submission for this student
+    const submission = submissions.find((s) => s.user_id === userId);
+
+    // Pre-populate rubric scores from existing Canvas rubric_assessment
+    if (submission?.rubric_assessment && rubric) {
+      const existingScores: Record<string, RubricScore> = {};
+      for (const [criterionId, assessment] of Object.entries(submission.rubric_assessment)) {
+        existingScores[criterionId] = {
+          criterionId,
+          ratingId: assessment.rating_id,
+          points: assessment.points,
+        };
+      }
+      setRubricScores(existingScores);
+    } else {
+      setRubricScores({});
+    }
+
+    // Pre-populate feedback text from existing Canvas comments (teacher's comments only)
+    if (submission?.submission_comments && submission.submission_comments.length > 0) {
+      // Find the most recent teacher comment (not from the student)
+      const teacherComments = submission.submission_comments.filter(
+        (c) => c.author_id !== submission.user_id
+      );
+      const latestComment = teacherComments[teacherComments.length - 1];
+      if (latestComment) {
+        setCurrentFeedback({ text: latestComment.comment, voiceDurationSeconds: 0 });
+        setExistingCommentId(latestComment.id);
+      } else {
+        setCurrentFeedback({ text: '', voiceDurationSeconds: 0 });
+        setExistingCommentId(null);
+      }
+    } else {
+      setCurrentFeedback({ text: '', voiceDurationSeconds: 0 });
+      setExistingCommentId(null);
+    }
+
+    // Reset competency grades (not stored in Canvas)
+    setCurrentGrades({});
 
     // Check for batch attachment for this student
     const batchAttachment = batchAttachments.get(userId);
@@ -136,7 +176,7 @@ export function BattleScreen({
       setPdfImages(aiImages);
       setParsedContent(`[Batch upload: ${batchAttachment.filename} with ${batchAttachment.pdfImages.length} pages]`);
     }
-  }, [batchAttachments]);
+  }, [batchAttachments, submissions, rubric]);
 
   // Handle PDF pages loaded - store for AI vision
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[], aiImages: PDFImageForAI[]) => {
@@ -291,6 +331,7 @@ export function BattleScreen({
           userId: currentSubmission.user_id,
           score: Math.round(totalScore),
           comment: currentFeedback.text,
+          existingCommentId: existingCommentId, // Pass for updating existing comment
         }),
       });
 
@@ -337,6 +378,7 @@ export function BattleScreen({
     gradedIds,
     submissions,
     handleSelectStudent,
+    existingCommentId,
   ]);
 
   // Handle content parsed from submission
@@ -390,6 +432,7 @@ export function BattleScreen({
               submissions={submissions}
               currentUserId={currentUserId}
               gradedIds={gradedIds}
+              batchUploadedIds={new Set(batchAttachments.keys())}
               onSelect={handleSelectStudent}
             />
           </div>
@@ -414,6 +457,7 @@ export function BattleScreen({
               studentName={currentStudent?.displayName || 'Student'}
               submissionContent={parsedContent}
               currentGrades={currentGrades}
+              currentFeedback={currentFeedback}
               onFeedbackChange={handleFeedbackChange}
               onGenerateAI={handleGenerateAI}
               isGenerating={isGeneratingFeedback}
