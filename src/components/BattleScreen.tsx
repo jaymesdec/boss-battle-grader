@@ -38,6 +38,7 @@ import type {
   BatchAttachment,
   ComprehensiveFeedbackResult,
   RubricScore,
+  GoogleDocImage,
 } from '@/types';
 
 interface BattleScreenProps {
@@ -108,6 +109,9 @@ export function BattleScreen({
   // PDF images for AI vision analysis
   const [pdfImages, setPdfImages] = useState<PDFImageForAI[]>([]);
 
+  // Google Doc images for AI vision analysis
+  const [googleDocImages, setGoogleDocImages] = useState<GoogleDocImage[]>([]);
+
   // Batch upload state
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [batchAttachments, setBatchAttachments] = useState<Map<number, BatchAttachment>>(new Map());
@@ -163,6 +167,7 @@ export function BattleScreen({
     setCurrentUserId(userId);
     setParsedContent('');
     setPdfImages([]);
+    setGoogleDocImages([]);
     setLastSpecificityTier(null); // Reset for new student
 
     // Find the submission for this student
@@ -234,6 +239,11 @@ export function BattleScreen({
     // Create a text summary of the PDF for text-based context
     const pagesSummary = `[PDF with ${pages.length} slides loaded for AI vision analysis]`;
     setParsedContent(pagesSummary);
+  }, []);
+
+  // Handle Google Doc images loaded - store for AI vision
+  const handleGoogleDocImagesLoaded = useCallback((images: GoogleDocImage[]) => {
+    setGoogleDocImages(images);
   }, []);
 
   // Handle batch attachments received from modal
@@ -369,6 +379,8 @@ export function BattleScreen({
           submissionContent: parsedContent || currentSubmission?.body || '',
           // Include PDF images for vision analysis if available
           pdfImages: pdfImages.length > 0 ? pdfImages : undefined,
+          // Include Google Doc images for vision analysis if available
+          googleDocImages: googleDocImages.length > 0 ? googleDocImages : undefined,
         }),
       });
 
@@ -388,7 +400,7 @@ export function BattleScreen({
     } finally {
       setIsGeneratingFeedback(false);
     }
-  }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo, pdfImages]);
+  }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo, pdfImages, googleDocImages]);
 
   // Generate ALL feedback at once (rubric scores, competency scores, and summary)
   const handleGenerateAllFeedback = useCallback(async () => {
@@ -404,6 +416,7 @@ export function BattleScreen({
           studentName: currentStudent?.displayName || 'Student',
           submissionContent: parsedContent || currentSubmission?.body || '',
           pdfImages: pdfImages.length > 0 ? pdfImages : undefined,
+          googleDocImages: googleDocImages.length > 0 ? googleDocImages : undefined,
           rubric: rubric,
           assignmentDescription: assignmentDescription,
           teacherNotes: currentFeedback.text, // Use current feedback text as teacher notes
@@ -516,6 +529,7 @@ export function BattleScreen({
     currentStudent,
     parsedContent,
     pdfImages,
+    googleDocImages,
     rubric,
     assignmentDescription,
     currentFeedback.text,
@@ -908,6 +922,7 @@ export function BattleScreen({
                 isLoading={isLoading}
                 onContentParsed={handleContentParsed}
                 onPDFPagesLoaded={handlePDFPagesLoaded}
+                onGoogleDocImagesLoaded={handleGoogleDocImagesLoaded}
                 batchAttachment={currentBatchAttachment}
                 onScrollProgress={handleScrollProgress}
               />

@@ -13,7 +13,7 @@ import {
   stripHtml,
 } from '@/lib/privacy';
 import { COMPETENCIES, RUBRIC_DESCRIPTORS, COMPETENCY_ORDER } from '@/lib/competencies';
-import type { AgentTaskType, SessionState, CanvasRubric, ComprehensiveFeedbackResult } from '@/types';
+import type { AgentTaskType, SessionState, CanvasRubric, ComprehensiveFeedbackResult, GoogleDocImage } from '@/types';
 
 // -----------------------------------------------------------------------------
 // Types
@@ -39,6 +39,7 @@ interface AgentRequest {
   grades?: Record<string, string>;
   submissionContent?: string;
   pdfImages?: PDFImageForAI[];
+  googleDocImages?: GoogleDocImage[];
   courseId?: number;
   assignmentId?: number;
   userId?: number;
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
 // -----------------------------------------------------------------------------
 
 async function handleGenerateAllFeedback(body: AgentRequest) {
-  const { studentName, submissionContent, pdfImages, rubric, assignmentDescription, teacherNotes } = body;
+  const { studentName, submissionContent, pdfImages, googleDocImages, rubric, assignmentDescription, teacherNotes } = body;
 
   // PRIVACY: Extract student identity for anonymization
   const identity = extractStudentIdentity(studentName || '');
@@ -224,8 +225,27 @@ ${anonymizedNotes ? `## TEACHER NOTES (use as additional context)\n${anonymizedN
 
 Respond with ONLY the JSON object, no other text.`;
 
-  // Build the message content with optional PDF images
+  // Build the message content with optional PDF and Google Doc images
   const userContent: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: 'image/jpeg'; data: string } }> = [];
+
+  const MAX_GOOGLE_DOC_IMAGES = 20;
+  const MAX_IMAGE_SIZE_BASE64 = 5 * 1024 * 1024; // 5MB per image
+
+  // Validate Google Doc images before processing
+  const validateGoogleDocImages = (images: GoogleDocImage[]): GoogleDocImage[] => {
+    return images.filter(img => {
+      const sizeBytes = Buffer.byteLength(img.base64Data, 'base64');
+      if (sizeBytes > MAX_IMAGE_SIZE_BASE64) {
+        console.warn(`Rejecting oversized image: ${img.objectId}`);
+        return false;
+      }
+      if (!/^[A-Za-z0-9+/]+=*$/.test(img.base64Data)) {
+        console.warn(`Rejecting invalid base64: ${img.objectId}`);
+        return false;
+      }
+      return true;
+    });
+  };
 
   // Add PDF images first if available
   if (pdfImages && pdfImages.length > 0) {
@@ -248,17 +268,47 @@ Respond with ONLY the JSON object, no other text.`;
         text: `[Slide ${i + 1}]`,
       });
     }
-
-    userContent.push({
-      type: 'text',
-      text: '\n\n' + userPrompt,
-    });
-  } else {
-    userContent.push({
-      type: 'text',
-      text: userPrompt,
-    });
   }
+
+  // Add Google Doc images if available
+  if (googleDocImages && googleDocImages.length > 0) {
+    const validImages = validateGoogleDocImages(googleDocImages);
+    const imagesToUse = validImages.slice(0, MAX_GOOGLE_DOC_IMAGES);
+    const truncated = validImages.length > MAX_GOOGLE_DOC_IMAGES;
+    const total = imagesToUse.length;
+
+    if (total > 0) {
+      userContent.push({
+        type: 'text',
+        text: `\nI'm providing ${total} image${total !== 1 ? 's' : ''} from the student's Google Doc submission${truncated ? ` (${validImages.length - MAX_GOOGLE_DOC_IMAGES} additional images omitted due to limit)` : ''}:\n`,
+      });
+
+      for (let i = 0; i < imagesToUse.length; i++) {
+        userContent.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: 'image/jpeg',
+            data: imagesToUse[i].base64Data,
+          },
+        });
+        // Consistent labeling with [Image N of M] pattern
+        const label = imagesToUse[i].altText
+          ? `[Image ${i + 1} of ${total}: ${imagesToUse[i].altText}]`
+          : `[Image ${i + 1} of ${total}]`;
+        userContent.push({
+          type: 'text',
+          text: label,
+        });
+      }
+    }
+  }
+
+  // Add the main prompt
+  userContent.push({
+    type: 'text',
+    text: (pdfImages?.length || googleDocImages?.length) ? '\n\n' + userPrompt : userPrompt,
+  });
 
   try {
     // Call Claude directly for structured JSON output

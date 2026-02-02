@@ -447,3 +447,18 @@ export interface StudentMatch {
     score: number;
   }>;
 }
+
+// -----------------------------------------------------------------------------
+// Google Docs Image Types
+// -----------------------------------------------------------------------------
+
+export interface GoogleDocImage {
+  readonly objectId: string;
+  readonly base64Data: string;
+  readonly mimeType: 'image/jpeg'; // Always convert to JPEG for consistency
+  readonly width: number;
+  readonly height: number;
+  readonly altText?: string;
+  readonly tabId?: string;
+  readonly type: 'inline' | 'positioned';
+}

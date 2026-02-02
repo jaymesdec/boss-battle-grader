@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
 import { SubmissionViewerOverlay } from './SubmissionViewerOverlay';
-import type { CanvasSubmission, BatchAttachment } from '@/types';
+import type { CanvasSubmission, BatchAttachment, GoogleDocImage } from '@/types';
 
 // Type for PDF images formatted for Claude's vision API
 export type PDFImageForAI = ReturnType<typeof getPDFImagesForAI>[number];
@@ -21,6 +21,7 @@ interface SubmissionViewerProps {
   isLoading?: boolean;
   onContentParsed?: (content: string) => void;
   onPDFPagesLoaded?: (pages: PDFPage[], aiImages: PDFImageForAI[]) => void;
+  onGoogleDocImagesLoaded?: (images: GoogleDocImage[]) => void;
   batchAttachment?: BatchAttachment | null;
   // Engagement tracking callback
   onScrollProgress?: (scrollPercent: number, engagementMet: boolean) => void;
@@ -31,6 +32,7 @@ export function SubmissionViewer({
   isLoading = false,
   onContentParsed,
   onPDFPagesLoaded,
+  onGoogleDocImagesLoaded,
   batchAttachment,
   onScrollProgress,
 }: SubmissionViewerProps) {
@@ -465,6 +467,7 @@ export function SubmissionViewer({
           isParsing={isParsing}
           onPDFPagesLoaded={handlePDFPagesLoaded}
           onContentParsed={onContentParsed}
+          onGoogleDocImagesLoaded={onGoogleDocImagesLoaded}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -517,6 +520,7 @@ export function SubmissionViewer({
           isParsing={isParsing}
           onPDFPagesLoaded={handlePDFPagesLoaded}
           onContentParsed={onContentParsed}
+          onGoogleDocImagesLoaded={onGoogleDocImagesLoaded}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -574,6 +578,7 @@ function ContentDisplay({
   onParse,
   onPDFPagesLoaded,
   onContentParsed,
+  onGoogleDocImagesLoaded,
 }: {
   source: ContentSource;
   parsedContent: string | null;
@@ -581,6 +586,7 @@ function ContentDisplay({
   onParse: () => void;
   onPDFPagesLoaded?: (pages: PDFPage[]) => void;
   onContentParsed?: (content: string) => void;
+  onGoogleDocImagesLoaded?: (images: GoogleDocImage[]) => void;
 }) {
   if (source.type === 'text') {
     return (
@@ -599,7 +605,7 @@ function ContentDisplay({
                         source.url.includes('drive.google.com');
 
     if (isGoogleDoc) {
-      return <GoogleDocViewer url={source.url} onContentParsed={onContentParsed} />;
+      return <GoogleDocViewer url={source.url} onContentParsed={onContentParsed} onImagesLoaded={onGoogleDocImagesLoaded} />;
     }
 
     return (
@@ -1023,6 +1029,8 @@ function ScriptDisplay({
 interface GoogleDocState {
   status: 'loading' | 'success' | 'not_connected' | 'error';
   content?: string;
+  images?: GoogleDocImage[];
+  imageWarning?: string;
   error?: string;
   errorCode?: string;
   fetchedAt?: Date;
@@ -1031,14 +1039,25 @@ interface GoogleDocState {
 function GoogleDocViewer({
   url,
   onContentParsed,
+  onImagesLoaded,
 }: {
   url: string;
   onContentParsed?: (content: string) => void;
+  onImagesLoaded?: (images: GoogleDocImage[]) => void;
 }) {
-  const { data: session, status: sessionStatus } = useSession();
+  const { status: sessionStatus } = useSession();
   const [state, setState] = useState<GoogleDocState>({ status: 'loading' });
 
+  // Use ref for callback to avoid dependency issues
+  const onImagesLoadedRef = useRef(onImagesLoaded);
   useEffect(() => {
+    onImagesLoadedRef.current = onImagesLoaded;
+  });
+
+  useEffect(() => {
+    // Cancellation token to prevent stale updates
+    let cancelled = false;
+
     async function fetchGoogleDoc() {
       setState({ status: 'loading' });
 
@@ -1046,13 +1065,26 @@ function GoogleDocViewer({
         const response = await fetch(`/api/google-docs?url=${encodeURIComponent(url)}`);
         const result = await response.json();
 
+        if (cancelled) return;
+
         if (result.success) {
           setState({
             status: 'success',
             content: result.content,
+            images: result.images,
+            imageWarning: result.imageWarning,
             fetchedAt: new Date(),
           });
           onContentParsed?.(result.content);
+
+          // Notify parent about images using ref to avoid dependency issues
+          if (result.images?.length) {
+            queueMicrotask(() => {
+              if (!cancelled) {
+                onImagesLoadedRef.current?.(result.images);
+              }
+            });
+          }
         } else if (result.errorCode === 'NOT_AUTHENTICATED') {
           setState({ status: 'not_connected' });
         } else {
@@ -1063,6 +1095,7 @@ function GoogleDocViewer({
           });
         }
       } catch (err) {
+        if (cancelled) return;
         setState({
           status: 'error',
           error: err instanceof Error ? err.message : 'Failed to fetch document',
@@ -1075,7 +1108,10 @@ function GoogleDocViewer({
     if (sessionStatus !== 'loading') {
       fetchGoogleDoc();
     }
-  }, [url, sessionStatus, onContentParsed]);
+
+    // Cleanup: cancel stale requests
+    return () => { cancelled = true; };
+  }, [url, sessionStatus, onContentParsed]); // Note: onImagesLoaded deliberately excluded
 
   if (state.status === 'loading' || sessionStatus === 'loading') {
     return (
@@ -1157,6 +1193,9 @@ function GoogleDocViewer({
   }
 
   // Success state
+  const hasImages = state.images && state.images.length > 0;
+  const aiImageCount = hasImages ? Math.min(state.images!.length, 20) : 0;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between p-3 bg-surface rounded-lg">
@@ -1179,6 +1218,42 @@ function GoogleDocViewer({
         </a>
       </div>
 
+      {/* Image Gallery */}
+      {hasImages && (
+        <div className="space-y-3">
+          {/* AI indicator */}
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <span>
+              {state.images!.length} image{state.images!.length !== 1 ? 's' : ''} detected
+            </span>
+            <span className="text-xs bg-surface px-2 py-0.5 rounded">
+              AI can see {aiImageCount} image{aiImageCount !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* Warning if some failed */}
+          {state.imageWarning && (
+            <div className="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded">
+              {state.imageWarning}
+            </div>
+          )}
+
+          {/* Inline images */}
+          <div className="flex flex-wrap gap-2">
+            {state.images!.map((image, index) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={image.objectId}
+                src={`data:${image.mimeType};base64,${image.base64Data}`}
+                alt={image.altText || `Image ${index + 1}`}
+                className="max-w-full max-h-64 rounded border border-surface object-contain"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Text content */}
       <div className="p-4 bg-surface/50 rounded-lg max-h-[500px] overflow-auto">
         <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono">
           {state.content}
@@ -1187,7 +1262,10 @@ function GoogleDocViewer({
 
       <div className="p-2 bg-surface/30 rounded-lg">
         <p className="text-xs text-text-muted text-center">
-          📄 AI can see the full document when generating feedback
+          {hasImages
+            ? `📸 AI can see ${aiImageCount} image${aiImageCount !== 1 ? 's' : ''} + text when generating feedback`
+            : '📄 AI can see the full document when generating feedback'
+          }
         </p>
       </div>
     </div>
