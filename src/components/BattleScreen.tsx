@@ -66,6 +66,11 @@ export function BattleScreen({
   // Local submissions state - allows updating after Canvas posts
   const [submissions, setSubmissions] = useState<CanvasSubmission[]>(initialSubmissions);
 
+  // Sync local submissions when props change (e.g., selecting different assignment)
+  useEffect(() => {
+    setSubmissions(initialSubmissions);
+  }, [initialSubmissions]);
+
   // Game state
   const [gameState, dispatch] = useReducer(gameReducer, null, createInitialGameState);
 
