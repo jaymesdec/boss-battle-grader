@@ -59,10 +59,13 @@ export function BattleScreen({
   assignmentName,
   assignmentDescription,
   dueAt,
-  submissions,
+  submissions: initialSubmissions,
   rubric,
   onBack,
 }: BattleScreenProps) {
+  // Local submissions state - allows updating after Canvas posts
+  const [submissions, setSubmissions] = useState<CanvasSubmission[]>(initialSubmissions);
+
   // Game state
   const [gameState, dispatch] = useReducer(gameReducer, null, createInitialGameState);
 
@@ -595,6 +598,34 @@ export function BattleScreen({
       // Mark as graded
       setGradedIds((prev) => new Set([...prev, currentSubmission.user_id]));
       dispatch({ type: 'MARK_GRADED', submissionId: String(currentSubmission.id) });
+
+      // Update local submissions array with the posted score and comment
+      setSubmissions((prev) =>
+        prev.map((s) => {
+          if (s.user_id !== currentSubmission.user_id) return s;
+
+          // Create new comment object for the feedback we just posted
+          const newComment = currentFeedback.text.trim()
+            ? {
+                id: Date.now(), // Temporary ID until Canvas returns real one
+                author_id: 0, // Will be teacher's ID
+                author_name: 'Teacher',
+                comment: currentFeedback.text,
+                created_at: new Date().toISOString(),
+              }
+            : null;
+
+          return {
+            ...s,
+            score: totalScore,
+            grade: String(Math.round(totalScore)),
+            rubric_assessment: rubricAssessment || s.rubric_assessment,
+            submission_comments: newComment
+              ? [...(s.submission_comments || []), newComment]
+              : s.submission_comments,
+          };
+        })
+      );
 
       // Calculate timeliness multiplier for personalization
       const daysSinceDeadline = getDaysSinceDeadline(dueAt || null);
