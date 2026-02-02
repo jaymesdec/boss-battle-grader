@@ -4,14 +4,8 @@
 // SubmissionXPSummary - Post-submission XP breakdown modal
 // =============================================================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { formatXP } from '@/lib/game';
-
-// Check if user prefers reduced motion
-function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 export interface XPBreakdown {
   engagement: number;
@@ -31,15 +25,12 @@ interface SubmissionXPSummaryProps {
   isLastSubmission?: boolean;
 }
 
-const AUTO_DISMISS_MS = 3000;
-
 export function SubmissionXPSummary({
   studentName,
   xpBreakdown,
   onContinue,
   isLastSubmission = false,
 }: SubmissionXPSummaryProps) {
-  const [progress, setProgress] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
 
   // Animate entrance
@@ -48,30 +39,7 @@ export function SubmissionXPSummary({
     return () => clearTimeout(timeout);
   }, []);
 
-  // Auto-dismiss timer with progress bar
-  useEffect(() => {
-    if (prefersReducedMotion()) {
-      // Skip animation, just wait then dismiss
-      const timeout = setTimeout(onContinue, AUTO_DISMISS_MS);
-      return () => clearTimeout(timeout);
-    }
-
-    const startTime = Date.now();
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const newProgress = Math.min((elapsed / AUTO_DISMISS_MS) * 100, 100);
-      setProgress(newProgress);
-
-      if (elapsed >= AUTO_DISMISS_MS) {
-        clearInterval(interval);
-        onContinue();
-      }
-    }, 50);
-
-    return () => clearInterval(interval);
-  }, [onContinue]);
-
-  // Handle keyboard shortcut (Enter or Space to continue immediately)
+  // Handle keyboard shortcut (Enter or Space to continue)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -216,17 +184,8 @@ export function SubmissionXPSummary({
           </div>
         </div>
 
-        {/* Progress bar and continue button */}
+        {/* Continue button */}
         <div className="space-y-3">
-          {/* Progress bar */}
-          <div className="h-1.5 bg-surface rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-accent-secondary to-accent-primary transition-all duration-100"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-
-          {/* Continue button */}
           <button
             onClick={onContinue}
             className="w-full py-3 bg-gradient-to-r from-accent-secondary to-accent-primary text-background rounded-xl font-display text-sm hover:opacity-90 transition-opacity"
