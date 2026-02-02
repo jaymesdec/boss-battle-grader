@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
 import { SubmissionViewerOverlay } from './SubmissionViewerOverlay';
-import type { CanvasSubmission, BatchAttachment, GoogleDocImage } from '@/types';
+import type { CanvasSubmission, BatchAttachment, GoogleDocImage, GoogleSlideImage } from '@/types';
 
 // Type for PDF images formatted for Claude's vision API
 export type PDFImageForAI = ReturnType<typeof getPDFImagesForAI>[number];
@@ -22,6 +22,7 @@ interface SubmissionViewerProps {
   onContentParsed?: (content: string) => void;
   onPDFPagesLoaded?: (pages: PDFPage[], aiImages: PDFImageForAI[]) => void;
   onGoogleDocImagesLoaded?: (images: GoogleDocImage[]) => void;
+  onGoogleSlidesLoaded?: (slides: GoogleSlideImage[]) => void;
   batchAttachment?: BatchAttachment | null;
   // Engagement tracking callback
   onScrollProgress?: (scrollPercent: number, engagementMet: boolean) => void;
@@ -33,6 +34,7 @@ export function SubmissionViewer({
   onContentParsed,
   onPDFPagesLoaded,
   onGoogleDocImagesLoaded,
+  onGoogleSlidesLoaded,
   batchAttachment,
   onScrollProgress,
 }: SubmissionViewerProps) {
@@ -468,6 +470,7 @@ export function SubmissionViewer({
           onPDFPagesLoaded={handlePDFPagesLoaded}
           onContentParsed={onContentParsed}
           onGoogleDocImagesLoaded={onGoogleDocImagesLoaded}
+          onGoogleSlidesLoaded={onGoogleSlidesLoaded}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -521,6 +524,7 @@ export function SubmissionViewer({
           onPDFPagesLoaded={handlePDFPagesLoaded}
           onContentParsed={onContentParsed}
           onGoogleDocImagesLoaded={onGoogleDocImagesLoaded}
+          onGoogleSlidesLoaded={onGoogleSlidesLoaded}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -579,6 +583,7 @@ function ContentDisplay({
   onPDFPagesLoaded,
   onContentParsed,
   onGoogleDocImagesLoaded,
+  onGoogleSlidesLoaded,
 }: {
   source: ContentSource;
   parsedContent: string | null;
@@ -587,6 +592,7 @@ function ContentDisplay({
   onPDFPagesLoaded?: (pages: PDFPage[]) => void;
   onContentParsed?: (content: string) => void;
   onGoogleDocImagesLoaded?: (images: GoogleDocImage[]) => void;
+  onGoogleSlidesLoaded?: (slides: GoogleSlideImage[]) => void;
 }) {
   if (source.type === 'text') {
     return (
@@ -603,6 +609,12 @@ function ContentDisplay({
     // Check if it's a Google Docs URL
     const isGoogleDoc = source.url.includes('docs.google.com/document') ||
                         source.url.includes('drive.google.com');
+    // Check if it's a Google Slides URL
+    const isGoogleSlides = source.url.includes('docs.google.com/presentation');
+
+    if (isGoogleSlides) {
+      return <GoogleSlidesViewer url={source.url} onContentParsed={onContentParsed} onSlidesLoaded={onGoogleSlidesLoaded} />;
+    }
 
     if (isGoogleDoc) {
       return <GoogleDocViewer url={source.url} onContentParsed={onContentParsed} onImagesLoaded={onGoogleDocImagesLoaded} />;
@@ -1296,4 +1308,340 @@ function formatRelativeTime(date: Date): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return date.toLocaleDateString();
+}
+
+// =============================================================================
+// Google Slides Display Component
+// =============================================================================
+
+interface GoogleSlidesState {
+  status: 'loading' | 'success' | 'not_connected' | 'error';
+  presentationTitle?: string;
+  slides?: GoogleSlideImage[];
+  textContent?: string;
+  slideWarning?: string;
+  error?: string;
+  errorCode?: string;
+  fetchedAt?: Date;
+}
+
+function GoogleSlidesViewer({
+  url,
+  onContentParsed,
+  onSlidesLoaded,
+}: {
+  url: string;
+  onContentParsed?: (content: string) => void;
+  onSlidesLoaded?: (slides: GoogleSlideImage[]) => void;
+}) {
+  const { status: sessionStatus } = useSession();
+  const [state, setState] = useState<GoogleSlidesState>({ status: 'loading' });
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  // Use ref for callback to avoid dependency issues
+  const onSlidesLoadedRef = useRef(onSlidesLoaded);
+  useEffect(() => {
+    onSlidesLoadedRef.current = onSlidesLoaded;
+  });
+
+  useEffect(() => {
+    // Cancellation token to prevent stale updates
+    let cancelled = false;
+
+    async function fetchGoogleSlides() {
+      setState({ status: 'loading' });
+
+      try {
+        const response = await fetch(`/api/google-docs?url=${encodeURIComponent(url)}`);
+        const result = await response.json();
+
+        if (cancelled) return;
+
+        if (result.success) {
+          setState({
+            status: 'success',
+            presentationTitle: result.presentationTitle,
+            slides: result.slides,
+            textContent: result.textContent,
+            slideWarning: result.slideWarning,
+            fetchedAt: new Date(),
+          });
+
+          if (result.textContent) {
+            onContentParsed?.(result.textContent);
+          }
+
+          // Notify parent about slides using ref to avoid dependency issues
+          if (result.slides?.length) {
+            queueMicrotask(() => {
+              if (!cancelled) {
+                onSlidesLoadedRef.current?.(result.slides);
+              }
+            });
+          }
+        } else if (result.errorCode === 'NOT_AUTHENTICATED') {
+          setState({ status: 'not_connected' });
+        } else {
+          setState({
+            status: 'error',
+            error: result.error,
+            errorCode: result.errorCode,
+          });
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setState({
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Failed to fetch presentation',
+          errorCode: 'UNKNOWN',
+        });
+      }
+    }
+
+    // Wait for session to be determined before fetching
+    if (sessionStatus !== 'loading') {
+      fetchGoogleSlides();
+    }
+
+    // Cleanup: cancel stale requests
+    return () => { cancelled = true; };
+  }, [url, sessionStatus, onContentParsed]); // Note: onSlidesLoaded deliberately excluded
+
+  // Reset slide index when slides change
+  useEffect(() => {
+    setCurrentSlide(0);
+  }, [state.slides]);
+
+  if (state.status === 'loading' || sessionStatus === 'loading') {
+    return (
+      <div className="flex flex-col items-center justify-center p-8">
+        <div className="animate-spin text-4xl mb-4">📊</div>
+        <p className="text-text-muted text-sm">Loading Google Slides...</p>
+      </div>
+    );
+  }
+
+  if (state.status === 'not_connected') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 p-3 bg-surface rounded-lg">
+          <span className="text-accent-secondary">📊</span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary hover:underline text-sm break-all"
+          >
+            {url}
+          </a>
+        </div>
+
+        <div className="p-4 bg-surface rounded-lg border border-accent-secondary/30">
+          <p className="text-text-primary mb-3">
+            This submission is a private Google Slides presentation.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => signIn('google')}
+              className="px-4 py-2 bg-accent-primary text-background rounded-lg text-sm font-display hover:bg-accent-primary/80 transition-colors"
+            >
+              Connect Google Account
+            </button>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent-primary hover:underline text-sm"
+            >
+              Or open manually
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 p-3 bg-surface rounded-lg">
+          <span className="text-accent-secondary">📊</span>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary hover:underline text-sm break-all"
+          >
+            {url}
+          </a>
+        </div>
+
+        <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/30">
+          <p className="text-red-400 mb-2">{getSlidesErrorMessage(state.errorCode)}</p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary hover:underline text-sm"
+          >
+            Open in Google Slides
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Success state
+  const hasSlides = state.slides && state.slides.length > 0;
+  const aiSlideCount = hasSlides ? Math.min(state.slides!.length, 20) : 0;
+  const currentSlideData = hasSlides ? state.slides![currentSlide] : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between p-3 bg-surface rounded-lg">
+        <div className="flex items-center gap-2">
+          <span className="text-green-400">📊</span>
+          <span className="text-text-primary text-sm">
+            {state.presentationTitle || 'Google Slides'}
+          </span>
+          {state.fetchedAt && (
+            <span className="text-text-muted text-xs">
+              (fetched {formatRelativeTime(state.fetchedAt)})
+            </span>
+          )}
+        </div>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent-primary hover:underline text-xs"
+        >
+          Open in Google Slides
+        </a>
+      </div>
+
+      {/* Warning if some failed */}
+      {state.slideWarning && (
+        <div className="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded">
+          {state.slideWarning}
+        </div>
+      )}
+
+      {/* Slide Display */}
+      {hasSlides && (
+        <div className="space-y-3">
+          {/* Navigation */}
+          <div className="flex items-center justify-between p-2 bg-surface/30 rounded-lg">
+            <button
+              onClick={() => setCurrentSlide((i) => Math.max(0, i - 1))}
+              disabled={currentSlide === 0}
+              className={`p-2 rounded-lg transition-all ${
+                currentSlide === 0
+                  ? 'text-text-muted cursor-not-allowed'
+                  : 'text-text-primary hover:bg-surface'
+              }`}
+            >
+              ◀
+            </button>
+            <span className="font-display text-sm text-text-primary">
+              SLIDE {currentSlide + 1} of {state.slides!.length}
+              {currentSlideData?.slideTitle && currentSlideData.slideTitle !== `Slide ${currentSlide + 1}` && (
+                <span className="text-text-muted ml-2">- {currentSlideData.slideTitle}</span>
+              )}
+            </span>
+            <button
+              onClick={() => setCurrentSlide((i) => Math.min(state.slides!.length - 1, i + 1))}
+              disabled={currentSlide === state.slides!.length - 1}
+              className={`p-2 rounded-lg transition-all ${
+                currentSlide === state.slides!.length - 1
+                  ? 'text-text-muted cursor-not-allowed'
+                  : 'text-text-primary hover:bg-surface'
+              }`}
+            >
+              ▶
+            </button>
+          </div>
+
+          {/* Current Slide Image */}
+          {currentSlideData && (
+            <div className="flex justify-center bg-surface/20 rounded-lg p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`data:${currentSlideData.mimeType};base64,${currentSlideData.base64Data}`}
+                alt={currentSlideData.slideTitle || `Slide ${currentSlide + 1}`}
+                className="max-w-full max-h-[400px] object-contain rounded shadow-lg"
+              />
+            </div>
+          )}
+
+          {/* Speaker Notes */}
+          {currentSlideData?.speakerNotes && (
+            <div className="p-3 bg-surface/30 rounded-lg">
+              <h4 className="text-xs font-display text-text-muted mb-1">SPEAKER NOTES</h4>
+              <p className="text-sm text-text-primary whitespace-pre-wrap">
+                {currentSlideData.speakerNotes}
+              </p>
+            </div>
+          )}
+
+          {/* Thumbnails */}
+          <div className="flex gap-2 p-2 overflow-x-auto bg-surface/20 rounded-lg">
+            {state.slides!.map((slide, i) => (
+              <button
+                key={slide.slideId}
+                onClick={() => setCurrentSlide(i)}
+                className={`flex-shrink-0 rounded-lg overflow-hidden transition-all ${
+                  currentSlide === i
+                    ? 'ring-2 ring-accent-primary'
+                    : 'opacity-60 hover:opacity-100'
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`data:${slide.mimeType};base64,${slide.base64Data}`}
+                  alt={slide.slideTitle || `Thumbnail ${i + 1}`}
+                  className="h-16 w-auto object-contain bg-white"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty presentation */}
+      {!hasSlides && (
+        <div className="p-4 bg-surface/50 rounded-lg text-center">
+          <p className="text-text-muted">This presentation has no slides.</p>
+        </div>
+      )}
+
+      {/* AI indicator */}
+      <div className="p-2 bg-surface/30 rounded-lg">
+        <p className="text-xs text-text-muted text-center">
+          {hasSlides
+            ? `📊 AI can see ${aiSlideCount} slide${aiSlideCount !== 1 ? 's' : ''} + notes when generating feedback`
+            : '📊 Empty presentation'
+          }
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function getSlidesErrorMessage(errorCode?: string): string {
+  switch (errorCode) {
+    case 'ACCESS_DENIED':
+      return "Your Google account doesn't have access to this presentation.";
+    case 'NOT_FOUND':
+      return "This presentation has been deleted or moved.";
+    case 'RATE_LIMITED':
+      return "Too many requests. Please wait a moment and try again.";
+    case 'API_NOT_ENABLED':
+      return "Google Slides API is not enabled. Please contact support.";
+    case 'INVALID_URL':
+      return "This doesn't appear to be a valid Google Slides URL.";
+    default:
+      return "Unable to load this Google Slides presentation.";
+  }
 }

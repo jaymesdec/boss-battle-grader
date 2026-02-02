@@ -462,3 +462,18 @@ export interface GoogleDocImage {
   readonly tabId?: string;
   readonly type: 'inline' | 'positioned';
 }
+
+// -----------------------------------------------------------------------------
+// Google Slides Types
+// -----------------------------------------------------------------------------
+
+export interface GoogleSlideImage {
+  readonly slideId: string;
+  readonly slideNumber: number;
+  readonly slideTitle?: string;
+  readonly base64Data: string;
+  readonly mimeType: 'image/jpeg';
+  readonly width: number;
+  readonly height: number;
+  readonly speakerNotes?: string;
+}

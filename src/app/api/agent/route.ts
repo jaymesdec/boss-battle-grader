@@ -13,7 +13,7 @@ import {
   stripHtml,
 } from '@/lib/privacy';
 import { COMPETENCIES, RUBRIC_DESCRIPTORS, COMPETENCY_ORDER } from '@/lib/competencies';
-import type { AgentTaskType, SessionState, CanvasRubric, ComprehensiveFeedbackResult, GoogleDocImage } from '@/types';
+import type { AgentTaskType, SessionState, CanvasRubric, ComprehensiveFeedbackResult, GoogleDocImage, GoogleSlideImage } from '@/types';
 
 // -----------------------------------------------------------------------------
 // Types
@@ -40,6 +40,7 @@ interface AgentRequest {
   submissionContent?: string;
   pdfImages?: PDFImageForAI[];
   googleDocImages?: GoogleDocImage[];
+  googleSlideImages?: GoogleSlideImage[];
   courseId?: number;
   assignmentId?: number;
   userId?: number;
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
 // -----------------------------------------------------------------------------
 
 async function handleGenerateAllFeedback(body: AgentRequest) {
-  const { studentName, submissionContent, pdfImages, googleDocImages, rubric, assignmentDescription, teacherNotes } = body;
+  const { studentName, submissionContent, pdfImages, googleDocImages, googleSlideImages, rubric, assignmentDescription, teacherNotes } = body;
 
   // PRIVACY: Extract student identity for anonymization
   const identity = extractStudentIdentity(studentName || '');
@@ -304,10 +305,44 @@ Respond with ONLY the JSON object, no other text.`;
     }
   }
 
+  // Add Google Slides images if available
+  if (googleSlideImages && googleSlideImages.length > 0) {
+    const MAX_SLIDE_IMAGES = 30; // Slides can have more pages than docs typically have images
+    const slidesToUse = googleSlideImages.slice(0, MAX_SLIDE_IMAGES);
+    const truncated = googleSlideImages.length > MAX_SLIDE_IMAGES;
+    const total = slidesToUse.length;
+
+    userContent.push({
+      type: 'text',
+      text: `\nI'm providing ${total} slide${total !== 1 ? 's' : ''} from the student's Google Slides presentation${truncated ? ` (${googleSlideImages.length - MAX_SLIDE_IMAGES} additional slides omitted due to limit)` : ''}:\n`,
+    });
+
+    for (let i = 0; i < slidesToUse.length; i++) {
+      const slide = slidesToUse[i];
+      userContent.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: slide.base64Data,
+        },
+      });
+      // Include slide title and speaker notes if available
+      let label = `[Slide ${slide.slideNumber}${slide.slideTitle ? `: ${slide.slideTitle}` : ''}]`;
+      if (slide.speakerNotes) {
+        label += `\nSpeaker Notes: ${slide.speakerNotes}`;
+      }
+      userContent.push({
+        type: 'text',
+        text: label,
+      });
+    }
+  }
+
   // Add the main prompt
   userContent.push({
     type: 'text',
-    text: (pdfImages?.length || googleDocImages?.length) ? '\n\n' + userPrompt : userPrompt,
+    text: (pdfImages?.length || googleDocImages?.length || googleSlideImages?.length) ? '\n\n' + userPrompt : userPrompt,
   });
 
   try {

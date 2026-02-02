@@ -1,7 +1,7 @@
-import { google, docs_v1 } from 'googleapis';
+import { google, docs_v1, slides_v1 } from 'googleapis';
 import { auth } from './auth';
 import pLimit from 'p-limit';
-import type { GoogleDocImage } from '@/types';
+import type { GoogleDocImage, GoogleSlideImage } from '@/types';
 
 interface TabContent {
   tabId: string;
@@ -180,33 +180,36 @@ function readStructuralElements(elements: docs_v1.Schema$StructuralElement[]): s
 // URL parsing utilities
 export function parseGoogleDocsUrl(url: string): {
   isGoogleDoc: boolean;
+  isGoogleSlides: boolean;
   documentId: string | null;
+  presentationId: string | null;
   isUnsupportedType: boolean;
   docType?: string;
 } {
   // Google Docs
   const docsMatch = url.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
   if (docsMatch) {
-    return { isGoogleDoc: true, documentId: docsMatch[1], isUnsupportedType: false };
+    return { isGoogleDoc: true, isGoogleSlides: false, documentId: docsMatch[1], presentationId: null, isUnsupportedType: false };
+  }
+
+  // Google Slides
+  const slidesMatch = url.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
+  if (slidesMatch) {
+    return { isGoogleDoc: false, isGoogleSlides: true, documentId: null, presentationId: slidesMatch[1], isUnsupportedType: false };
   }
 
   // Google Sheets (unsupported)
   if (url.includes('docs.google.com/spreadsheets')) {
-    return { isGoogleDoc: false, documentId: null, isUnsupportedType: true, docType: 'Google Sheets' };
-  }
-
-  // Google Slides (unsupported)
-  if (url.includes('docs.google.com/presentation')) {
-    return { isGoogleDoc: false, documentId: null, isUnsupportedType: true, docType: 'Google Slides' };
+    return { isGoogleDoc: false, isGoogleSlides: false, documentId: null, presentationId: null, isUnsupportedType: true, docType: 'Google Sheets' };
   }
 
   // Google Drive file (may or may not be a Doc)
   const driveMatch = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([a-zA-Z0-9_-]+)/);
   if (driveMatch) {
-    return { isGoogleDoc: true, documentId: driveMatch[1], isUnsupportedType: false };
+    return { isGoogleDoc: true, isGoogleSlides: false, documentId: driveMatch[1], presentationId: null, isUnsupportedType: false };
   }
 
-  return { isGoogleDoc: false, documentId: null, isUnsupportedType: false };
+  return { isGoogleDoc: false, isGoogleSlides: false, documentId: null, presentationId: null, isUnsupportedType: false };
 }
 
 export function isGoogleDocsUrl(url: string): boolean {
@@ -389,4 +392,280 @@ async function downloadAllImages(
   );
 
   return { images, failedCount };
+}
+
+// -----------------------------------------------------------------------------
+// Google Slides API Functions
+// -----------------------------------------------------------------------------
+
+export interface GoogleSlidesResult {
+  success: boolean;
+  presentationTitle?: string;
+  slides?: GoogleSlideImage[];
+  textContent?: string;
+  slideWarning?: string;
+  error?: string;
+  errorCode?: 'NOT_AUTHENTICATED' | 'ACCESS_DENIED' | 'NOT_FOUND' | 'RATE_LIMITED' | 'API_NOT_ENABLED' | 'UNKNOWN';
+}
+
+/**
+ * Fetch a Google Slides presentation and extract slide thumbnails + text.
+ */
+export async function fetchGoogleSlides(presentationId: string): Promise<GoogleSlidesResult> {
+  const session = await auth();
+
+  if (!session?.accessToken) {
+    return {
+      success: false,
+      error: 'Google account not connected',
+      errorCode: 'NOT_AUTHENTICATED'
+    };
+  }
+
+  const oauth2Client = new google.auth.OAuth2();
+  oauth2Client.setCredentials({ access_token: session.accessToken });
+
+  const slidesApi = google.slides({ version: 'v1', auth: oauth2Client });
+
+  try {
+    // Fetch presentation metadata and slides
+    const response = await slidesApi.presentations.get({ presentationId });
+    const presentation = response.data;
+
+    if (!presentation.slides || presentation.slides.length === 0) {
+      return {
+        success: true,
+        presentationTitle: presentation.title || 'Untitled Presentation',
+        slides: [],
+        textContent: '',
+      };
+    }
+
+    // Extract text content and speaker notes from all slides
+    const textParts: string[] = [];
+    const slideData: Array<{
+      slideId: string;
+      slideNumber: number;
+      slideTitle: string;
+      speakerNotes: string;
+    }> = [];
+
+    presentation.slides.forEach((slide, index) => {
+      const slideId = slide.objectId || `slide-${index}`;
+      const slideText = extractTextFromSlide(slide);
+      const speakerNotes = extractSpeakerNotes(slide);
+      const slideTitle = extractSlideTitle(slide) || `Slide ${index + 1}`;
+
+      slideData.push({
+        slideId,
+        slideNumber: index + 1,
+        slideTitle,
+        speakerNotes,
+      });
+
+      // Add to combined text content
+      textParts.push(`--- Slide ${index + 1}: ${slideTitle} ---`);
+      if (slideText) textParts.push(slideText);
+      if (speakerNotes) textParts.push(`[Speaker Notes: ${speakerNotes}]`);
+    });
+
+    // Download thumbnails for all slides
+    const { slides: downloadedSlides, failedCount } = await downloadAllSlideThumbnails(
+      slidesApi,
+      presentationId,
+      slideData,
+      session.accessToken
+    );
+
+    return {
+      success: true,
+      presentationTitle: presentation.title || 'Untitled Presentation',
+      slides: downloadedSlides,
+      textContent: textParts.join('\n\n'),
+      slideWarning: failedCount > 0 ? `${failedCount} slide(s) could not be loaded` : undefined,
+    };
+  } catch (error: unknown) {
+    const err = error as { code?: number; message?: string };
+
+    // Check for API not enabled error
+    if (err.code === 403 && err.message?.includes('not been used in project')) {
+      return {
+        success: false,
+        error: 'Google Slides API is not enabled. Please enable it in Google Cloud Console.',
+        errorCode: 'API_NOT_ENABLED'
+      };
+    }
+    if (err.code === 403) {
+      return { success: false, error: 'Access denied to this presentation', errorCode: 'ACCESS_DENIED' };
+    }
+    if (err.code === 404) {
+      return { success: false, error: 'Presentation not found or has been deleted', errorCode: 'NOT_FOUND' };
+    }
+    if (err.code === 429) {
+      return { success: false, error: 'Rate limited - please try again shortly', errorCode: 'RATE_LIMITED' };
+    }
+    return { success: false, error: err.message || 'Unknown error', errorCode: 'UNKNOWN' };
+  }
+}
+
+/**
+ * Extract text content from a slide's page elements.
+ */
+function extractTextFromSlide(slide: slides_v1.Schema$Page): string {
+  const texts: string[] = [];
+
+  for (const element of slide.pageElements || []) {
+    if (element.shape?.text?.textElements) {
+      const text = element.shape.text.textElements
+        .filter(el => el.textRun?.content)
+        .map(el => el.textRun!.content)
+        .join('');
+      if (text.trim()) texts.push(text.trim());
+    }
+
+    // Extract text from tables
+    if (element.table) {
+      for (const row of element.table.tableRows || []) {
+        for (const cell of row.tableCells || []) {
+          if (cell.text?.textElements) {
+            const cellText = cell.text.textElements
+              .filter(el => el.textRun?.content)
+              .map(el => el.textRun!.content)
+              .join('');
+            if (cellText.trim()) texts.push(cellText.trim());
+          }
+        }
+      }
+    }
+  }
+
+  return texts.join('\n');
+}
+
+/**
+ * Extract speaker notes from a slide.
+ */
+function extractSpeakerNotes(slide: slides_v1.Schema$Page): string {
+  const notesPage = slide.slideProperties?.notesPage;
+  if (!notesPage) return '';
+
+  const notesId = notesPage.notesProperties?.speakerNotesObjectId;
+  if (!notesId) return '';
+
+  const notesShape = notesPage.pageElements?.find(el => el.objectId === notesId);
+  if (!notesShape?.shape?.text?.textElements) return '';
+
+  return notesShape.shape.text.textElements
+    .filter(el => el.textRun?.content)
+    .map(el => el.textRun!.content)
+    .join('')
+    .trim();
+}
+
+/**
+ * Extract slide title from the first title-shaped element.
+ */
+function extractSlideTitle(slide: slides_v1.Schema$Page): string | undefined {
+  for (const element of slide.pageElements || []) {
+    // Check if it's a title placeholder
+    if (element.shape?.placeholder?.type === 'TITLE' ||
+        element.shape?.placeholder?.type === 'CENTERED_TITLE') {
+      if (element.shape.text?.textElements) {
+        const title = element.shape.text.textElements
+          .filter(el => el.textRun?.content)
+          .map(el => el.textRun!.content)
+          .join('')
+          .trim();
+        if (title) return title;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Download thumbnails for all slides using the Slides API.
+ */
+async function downloadAllSlideThumbnails(
+  slidesApi: slides_v1.Slides,
+  presentationId: string,
+  slideData: Array<{
+    slideId: string;
+    slideNumber: number;
+    slideTitle: string;
+    speakerNotes: string;
+  }>,
+  accessToken: string
+): Promise<{ slides: GoogleSlideImage[]; failedCount: number }> {
+  const limit = pLimit(CONCURRENT_DOWNLOADS);
+  const slides: GoogleSlideImage[] = [];
+  let failedCount = 0;
+
+  await Promise.all(
+    slideData.map((data) =>
+      limit(async () => {
+        try {
+          // Get thumbnail URL from Slides API
+          const thumbnail = await slidesApi.presentations.pages.getThumbnail({
+            presentationId,
+            pageObjectId: data.slideId,
+            'thumbnailProperties.mimeType': 'PNG',
+            'thumbnailProperties.thumbnailSize': 'LARGE',
+          });
+
+          if (!thumbnail.data.contentUrl) {
+            failedCount++;
+            return;
+          }
+
+          // Download the thumbnail image
+          const response = await fetch(thumbnail.data.contentUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(15000), // 15 second timeout for slides
+          });
+
+          if (!response.ok) {
+            console.error(`Failed to download slide ${data.slideId}: HTTP ${response.status}`);
+            failedCount++;
+            return;
+          }
+
+          const arrayBuffer = await response.arrayBuffer();
+
+          // Validate size
+          if (arrayBuffer.byteLength > MAX_IMAGE_SIZE_BYTES) {
+            console.error(`Slide ${data.slideId} exceeds 5MB limit`);
+            failedCount++;
+            return;
+          }
+
+          // Resize and convert to JPEG
+          const processed = await resizeAndConvert(arrayBuffer);
+          if (!processed) {
+            failedCount++;
+            return;
+          }
+
+          slides.push({
+            slideId: data.slideId,
+            slideNumber: data.slideNumber,
+            slideTitle: data.slideTitle,
+            base64Data: processed.base64Data,
+            mimeType: 'image/jpeg',
+            width: processed.width,
+            height: processed.height,
+            speakerNotes: data.speakerNotes || undefined,
+          });
+        } catch (error) {
+          console.error(`Failed to download slide ${data.slideId}:`, error);
+          failedCount++;
+        }
+      })
+    )
+  );
+
+  // Sort slides by slide number
+  slides.sort((a, b) => a.slideNumber - b.slideNumber);
+
+  return { slides, failedCount };
 }
