@@ -234,6 +234,25 @@ export interface TeacherPreferences {
 
 export type ScreenType = 'hub' | 'level' | 'battle' | 'results';
 
+// Behavior categories for quality-focused gamification
+export type BehaviorCategory = 'engagement' | 'specificity' | 'personalization' | 'timeliness' | 'completeness';
+
+export interface CategoryXP {
+  engagement: number;
+  specificity: number;
+  personalization: number;
+  timeliness: number;
+  completeness: number;
+}
+
+export type PersonalizationTier = 'untouched' | 'reviewed' | 'personalized';
+export type SpecificityTier = 'low' | 'medium' | 'high';
+
+export interface SubmissionEngagement {
+  scrollPercentage: number;
+  engagementMet: boolean;
+}
+
 export interface GameState {
   currentScreen: ScreenType;
   selectedCourseId: number | null;
@@ -245,6 +264,12 @@ export interface GameState {
   sessionStartTime: number;
   gradedSubmissionIds: string[];
   soundEnabled: boolean;
+  // Category-based XP tracking
+  categoryXP: CategoryXP;
+  // Per-submission engagement tracking (keyed by submission ID)
+  submissionEngagement: Record<string, SubmissionEngagement>;
+  // Original AI drafts for personalization diff (keyed by submission ID)
+  aiDraftBaselines: Record<string, string>;
 }
 
 export type StreakLabel = 'COMBO' | 'STREAK' | 'ON FIRE' | 'UNSTOPPABLE' | null;
@@ -269,6 +294,14 @@ export type AgentTaskType =
   | 'analyze_trends'
   | 'custom';
 
+// Specificity analysis from AI synthesis
+export interface SpecificityAnalysis {
+  submissionReferences: string[];
+  rubricReferences: string[];
+  totalReferences: number;
+  tier: SpecificityTier;
+}
+
 // Response from generate_all_feedback task
 export interface ComprehensiveFeedbackResult {
   rubricScores: Array<{
@@ -282,6 +315,7 @@ export interface ComprehensiveFeedbackResult {
     grade: Grade;
   }>;
   generalSummary: string;
+  specificityAnalysis?: SpecificityAnalysis;
 }
 
 export interface AgentTask {
@@ -358,6 +392,25 @@ export interface PointsBreakdown {
   base: number;
   speedBonus: number;
   multiplier: number;
+  total: number;
+}
+
+// Category-based grading action
+export interface CategoryGradeAction {
+  submissionId: string;
+  engagementMet: boolean;
+  specificityTier?: SpecificityTier;
+  personalizationTier?: PersonalizationTier;
+  daysSinceDeadline: number | null; // null if no deadline
+}
+
+export interface CategoryPointsBreakdown {
+  engagement: number;
+  specificity: number;
+  personalization: number;
+  subtotal: number;
+  timelinessMultiplier: number;
+  comboMultiplier: number;
   total: number;
 }
 

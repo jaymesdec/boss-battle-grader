@@ -172,6 +172,12 @@ You will analyze the submission and generate scores and feedback for both the as
 - Keep all feedback SHORT and DIRECT
 - If selecting the highest rating for a criterion: challenge them to go even further
 
+## SPECIFICITY ANALYSIS
+When teacher notes are provided, analyze them for specificity:
+- Submission references: quotes, slide numbers, specific examples from the student's work
+- Rubric/competency references: mentions of specific criteria or competency names
+Count and list these references to help measure feedback quality.
+
 ## OUTPUT FORMAT
 You must respond with ONLY valid JSON in this exact format:
 {
@@ -186,8 +192,16 @@ You must respond with ONLY valid JSON in this exact format:
   "competencyScores": [
     { "competencyId": "collaboration", "grade": "B" }
   ],
-  "generalSummary": "First sentence: overall assessment. Second sentence: key strength with evidence. Third sentence: primary growth opportunity or next challenge."
-}`;
+  "generalSummary": "First sentence: overall assessment. Second sentence: key strength with evidence. Third sentence: primary growth opportunity or next challenge.",
+  "specificityAnalysis": {
+    "submissionReferences": ["specific quote or reference from student work"],
+    "rubricReferences": ["competency or criterion mentioned by name"],
+    "totalReferences": 2,
+    "tier": "medium"
+  }
+}
+
+For specificityAnalysis.tier: "low" = 0 references, "medium" = 1-2 references, "high" = 3+ references`;
 
   const userPrompt = `## ASSIGNMENT DESCRIPTION
 ${cleanAssignmentDescription || 'No assignment description provided.'}

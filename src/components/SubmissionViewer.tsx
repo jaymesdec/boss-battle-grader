@@ -4,7 +4,7 @@
 // SubmissionViewer - Display student submission content with tabs
 // =============================================================================
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
 import { SubmissionViewerOverlay } from './SubmissionViewerOverlay';
@@ -13,12 +13,17 @@ import type { CanvasSubmission, BatchAttachment } from '@/types';
 // Type for PDF images formatted for Claude's vision API
 export type PDFImageForAI = ReturnType<typeof getPDFImagesForAI>[number];
 
+// Engagement threshold for scroll-to-unlock (90%)
+const ENGAGEMENT_THRESHOLD = 90;
+
 interface SubmissionViewerProps {
   submission: CanvasSubmission | null;
   isLoading?: boolean;
   onContentParsed?: (content: string) => void;
   onPDFPagesLoaded?: (pages: PDFPage[], aiImages: PDFImageForAI[]) => void;
   batchAttachment?: BatchAttachment | null;
+  // Engagement tracking callback
+  onScrollProgress?: (scrollPercent: number, engagementMet: boolean) => void;
 }
 
 export function SubmissionViewer({
@@ -27,18 +32,87 @@ export function SubmissionViewer({
   onContentParsed,
   onPDFPagesLoaded,
   batchAttachment,
+  onScrollProgress,
 }: SubmissionViewerProps) {
   const [activeTab, setActiveTab] = useState(0);
   const [parsedContent, setParsedContent] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [batchImageIndex, setBatchImageIndex] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [maxScrollPercent, setMaxScrollPercent] = useState(0);
+
+  // Ref for scroll tracking
+  const contentRef = useRef<HTMLDivElement>(null);
+  const tickingRef = useRef(false);
 
   // Handle PDF pages loaded - convert to AI format and notify parent
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[]) => {
     const aiImages = getPDFImagesForAI(pages);
     onPDFPagesLoaded?.(pages, aiImages);
   }, [onPDFPagesLoaded]);
+
+  // Scroll tracking for engagement
+  const calculateScrollProgress = useCallback(() => {
+    const element = contentRef.current;
+    if (!element) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = element;
+    const scrollableHeight = scrollHeight - clientHeight;
+
+    // Handle content that fits without scrolling - auto-complete engagement
+    if (scrollableHeight <= 0) {
+      if (maxScrollPercent < 100) {
+        setMaxScrollPercent(100);
+        onScrollProgress?.(100, true);
+      }
+      return;
+    }
+
+    const currentPercent = Math.min(100, (scrollTop / scrollableHeight) * 100);
+    if (currentPercent > maxScrollPercent) {
+      const newMax = currentPercent;
+      setMaxScrollPercent(newMax);
+      const engagementMet = newMax >= ENGAGEMENT_THRESHOLD;
+      onScrollProgress?.(newMax, engagementMet);
+    }
+
+    tickingRef.current = false;
+  }, [maxScrollPercent, onScrollProgress]);
+
+  const handleScroll = useCallback(() => {
+    if (!tickingRef.current) {
+      requestAnimationFrame(calculateScrollProgress);
+      tickingRef.current = true;
+    }
+  }, [calculateScrollProgress]);
+
+  // Set up scroll listener
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element) return;
+
+    // Check initial state (content might fit without scroll)
+    calculateScrollProgress();
+
+    // CRITICAL: Use passive listener for smooth scrolling on mobile
+    element.addEventListener('scroll', handleScroll, { passive: true });
+    return () => element.removeEventListener('scroll', handleScroll);
+  }, [handleScroll, calculateScrollProgress]);
+
+  // Reset scroll tracking when submission changes
+  useEffect(() => {
+    setMaxScrollPercent(0);
+    // Check if new content fits without scroll
+    const element = contentRef.current;
+    if (element) {
+      const { scrollHeight, clientHeight } = element;
+      if (scrollHeight <= clientHeight) {
+        // Content fits - auto-complete engagement
+        setMaxScrollPercent(100);
+        onScrollProgress?.(100, true);
+      }
+    }
+  }, [submission?.id, onScrollProgress]);
 
   // Reset batch image index when batch attachment changes
   useEffect(() => {
@@ -70,6 +144,14 @@ export function SubmissionViewer({
   }
 
   // If there's a batch attachment, show it instead of regular submission
+  // Batch uploads auto-complete engagement (AI already processed the content)
+  useEffect(() => {
+    if (batchAttachment && maxScrollPercent < 100) {
+      setMaxScrollPercent(100);
+      onScrollProgress?.(100, true);
+    }
+  }, [batchAttachment, maxScrollPercent, onScrollProgress]);
+
   if (batchAttachment) {
     return (
       <div className="h-full flex flex-col">
@@ -354,8 +436,8 @@ export function SubmissionViewer({
         </div>
       )}
 
-      {/* Content display */}
-      <div className="flex-1 overflow-auto p-4">
+      {/* Content display - with scroll tracking for engagement */}
+      <div ref={contentRef} className="flex-1 overflow-auto p-4">
         <ContentDisplay
           source={activeSource}
           parsedContent={parsedContent}

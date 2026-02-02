@@ -18,7 +18,11 @@ import {
   createInitialGameState,
   gameReducer,
   calculatePoints,
+  calculatePersonalizationTier,
+  getDaysSinceDeadline,
+  calculateTimelinessMultiplier,
   POINTS,
+  CATEGORY_POINTS,
 } from '@/lib/game';
 import { saveCompetencyScores, loadCompetencyScores } from '@/lib/storage';
 import { useSound } from '@/hooks/useSound';
@@ -40,6 +44,7 @@ interface BattleScreenProps {
   assignmentId: number;
   assignmentName: string;
   assignmentDescription?: string;
+  dueAt?: string | null;
   submissions: CanvasSubmission[];
   rubric?: CanvasRubric[];
   onBack: () => void;
@@ -51,6 +56,7 @@ export function BattleScreen({
   assignmentId,
   assignmentName,
   assignmentDescription,
+  dueAt,
   submissions,
   rubric,
   onBack,
@@ -110,6 +116,10 @@ export function BattleScreen({
 
   // Feedback review overlay
   const [isReviewOpen, setIsReviewOpen] = useState(false);
+
+  // Engagement tracking for scroll-to-unlock
+  const [engagementMet, setEngagementMet] = useState(false);
+  const [scrollPercent, setScrollPercent] = useState(0);
 
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
@@ -294,6 +304,37 @@ export function BattleScreen({
     setCurrentFeedback(feedback);
   }, []);
 
+  // Handle scroll progress for engagement tracking
+  const handleScrollProgress = useCallback((percent: number, met: boolean) => {
+    setScrollPercent(percent);
+    setEngagementMet(met);
+
+    // Store engagement state in game state for the current submission
+    if (currentSubmission) {
+      dispatch({
+        type: 'SET_SUBMISSION_ENGAGEMENT',
+        submissionId: String(currentSubmission.id),
+        scrollPercentage: percent,
+        engagementMet: met,
+      });
+    }
+  }, [currentSubmission]);
+
+  // Reset engagement when switching students
+  useEffect(() => {
+    // Check if we have stored engagement for this submission
+    if (currentSubmission) {
+      const storedEngagement = gameState.submissionEngagement[String(currentSubmission.id)];
+      if (storedEngagement) {
+        setScrollPercent(storedEngagement.scrollPercentage);
+        setEngagementMet(storedEngagement.engagementMet);
+      } else {
+        setScrollPercent(0);
+        setEngagementMet(false);
+      }
+    }
+  }, [currentSubmission?.id, gameState.submissionEngagement]);
+
   // Generate AI feedback
   const handleGenerateAI = useCallback(async () => {
     if (Object.keys(currentGrades).length === 0) return;
@@ -395,9 +436,52 @@ export function BattleScreen({
       // Update feedback with general summary (replaces teacher notes)
       if (result.generalSummary) {
         setCurrentFeedback({ text: result.generalSummary, voiceDurationSeconds: 0 });
+
+        // Store AI draft baseline for personalization tracking (Phase 4)
+        dispatch({
+          type: 'SET_AI_DRAFT_BASELINE',
+          submissionId: String(currentSubmission.id),
+          draft: result.generalSummary,
+        });
       }
 
-      // Award points for using AI
+      // Calculate timeliness multiplier based on days since deadline
+      const daysSinceDeadline = getDaysSinceDeadline(dueAt || null);
+      const timelinessMultiplier = calculateTimelinessMultiplier(daysSinceDeadline);
+
+      // Award engagement XP if engagement threshold was met (with timeliness multiplier)
+      if (engagementMet) {
+        const engagementPoints = Math.round(CATEGORY_POINTS.ENGAGEMENT * timelinessMultiplier);
+        dispatch({
+          type: 'ADD_CATEGORY_XP',
+          category: 'engagement',
+          points: engagementPoints,
+        });
+        dispatch({ type: 'INCREMENT_COMBO' });
+      }
+
+      // Award specificity XP based on AI analysis tier (with timeliness multiplier)
+      if (result.specificityAnalysis) {
+        const baseSpecificityPoints = CATEGORY_POINTS.SPECIFICITY[result.specificityAnalysis.tier];
+        const specificityPoints = Math.round(baseSpecificityPoints * timelinessMultiplier);
+        dispatch({
+          type: 'ADD_CATEGORY_XP',
+          category: 'specificity',
+          points: specificityPoints,
+        });
+      }
+
+      // Award timeliness XP as a tracking category (shows in summary)
+      if (timelinessMultiplier > 1.0) {
+        // Bonus timeliness XP for same-day grading
+        dispatch({
+          type: 'ADD_CATEGORY_XP',
+          category: 'timeliness',
+          points: Math.round(20 * timelinessMultiplier), // Bonus visibility points
+        });
+      }
+
+      // Award legacy points for using AI (kept for backward compatibility)
       const points = calculatePoints({ type: 'generate_ai' }, gameState.combo);
       dispatch({ type: 'ADD_XP', points: points.total });
 
@@ -417,6 +501,8 @@ export function BattleScreen({
     currentFeedback.text,
     assignmentId,
     gameState.combo,
+    engagementMet,
+    dueAt,
   ]);
 
   // Open feedback review overlay
@@ -498,7 +584,31 @@ export function BattleScreen({
       setGradedIds((prev) => new Set([...prev, currentSubmission.user_id]));
       dispatch({ type: 'MARK_GRADED', submissionId: String(currentSubmission.id) });
 
-      // Award points for posting
+      // Calculate timeliness multiplier for personalization
+      const daysSinceDeadline = getDaysSinceDeadline(dueAt || null);
+      const timelinessMultiplier = calculateTimelinessMultiplier(daysSinceDeadline);
+
+      // Award personalization XP based on how much teacher edited the AI draft
+      const aiDraftBaseline = gameState.aiDraftBaselines[String(currentSubmission.id)];
+      const personalizationTier = calculatePersonalizationTier(
+        aiDraftBaseline || null,
+        currentFeedback.text
+      );
+      const basePersonalizationPoints = CATEGORY_POINTS.PERSONALIZATION[personalizationTier];
+      const personalizationPoints = Math.round(basePersonalizationPoints * timelinessMultiplier);
+      if (personalizationPoints > 0) {
+        dispatch({
+          type: 'ADD_CATEGORY_XP',
+          category: 'personalization',
+          points: personalizationPoints,
+        });
+        // Combo applies to personalization (per spec)
+        if (personalizationTier === 'personalized') {
+          dispatch({ type: 'INCREMENT_COMBO' });
+        }
+      }
+
+      // Award legacy points for posting (kept for backward compatibility)
       const sessionDuration = (Date.now() - gameState.sessionStartTime) / 1000;
       const avgTimePerSubmission = sessionDuration / (gradedIds.size + 1);
       const points = calculatePoints(
@@ -511,6 +621,19 @@ export function BattleScreen({
       if (currentFeedback.text.trim().length > 0) {
         const feedbackPoints = calculatePoints({ type: 'add_feedback' }, gameState.combo);
         dispatch({ type: 'ADD_XP', points: feedbackPoints.total });
+      }
+
+      // Check for completeness bonus - all submissions graded
+      const newGradedIds = new Set([...gradedIds, currentSubmission.user_id]);
+      const submissionsWithContent = submissions.filter(
+        (s) => s.submitted_at !== null && s.submission_type !== null
+      );
+      const allGraded = submissionsWithContent.every((s) => newGradedIds.has(s.user_id));
+
+      if (allGraded && submissionsWithContent.length > 0) {
+        // Award completeness bonus for finishing the entire assignment
+        dispatch({ type: 'AWARD_COMPLETENESS_BONUS' });
+        playSound('success'); // Special sound for completing assignment
       }
 
       // Move to next ungraded student
@@ -538,6 +661,7 @@ export function BattleScreen({
     submissions,
     handleSelectStudent,
     playSound,
+    dueAt,
   ]);
 
   // Handle content parsed from submission
@@ -688,6 +812,7 @@ export function BattleScreen({
                 onContentParsed={handleContentParsed}
                 onPDFPagesLoaded={handlePDFPagesLoaded}
                 batchAttachment={currentBatchAttachment}
+                onScrollProgress={handleScrollProgress}
               />
             )}
           </div>
@@ -702,6 +827,8 @@ export function BattleScreen({
               onFeedbackChange={handleFeedbackChange}
               onGenerateAI={handleGenerateAllFeedback}
               isGenerating={isGeneratingAll}
+              engagementMet={engagementMet}
+              scrollPercent={scrollPercent}
             />
           </div>
         </div>

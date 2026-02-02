@@ -2,29 +2,74 @@
 // Game State Management - XP, Combos, Streaks
 // =============================================================================
 
-import type { GameState, GradeAction, PointsBreakdown, StreakLabel, Achievement } from '@/types';
+import type {
+  GameState,
+  GradeAction,
+  PointsBreakdown,
+  StreakLabel,
+  Achievement,
+  CategoryGradeAction,
+  CategoryPointsBreakdown,
+  PersonalizationTier,
+  SpecificityTier,
+  CategoryXP,
+} from '@/types';
 
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
 
+// Legacy points (kept for backward compatibility during transition)
 export const POINTS = {
   GRADE_COMPETENCY: 50,
   COMPLETE_ALL_9: 300,
-  SPEED_BONUS_2MIN: 200,
-  SPEED_BONUS_3MIN: 100,
   ADD_FEEDBACK: 75,
   GENERATE_AI: 50,
   POST_TO_CANVAS: 100,
 } as const;
 
-export const COMBO_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-export const MAX_MULTIPLIER = 2.0;
-export const MULTIPLIER_PER_COMBO = 0.1;
+// Behavior category XP values
+export const CATEGORY_POINTS = {
+  ENGAGEMENT: 50,
+  SPECIFICITY: {
+    low: 30,
+    medium: 60,
+    high: 90,
+  },
+  PERSONALIZATION: {
+    untouched: 0,
+    reviewed: 50,
+    personalized: 100,
+  },
+  COMPLETENESS_BONUS: 500,
+} as const;
+
+// Timeliness multipliers based on days since deadline
+export const TIMELINESS_MULTIPLIERS = {
+  SAME_DAY: 1.2,      // 0 days
+  ONE_TO_TWO: 1.0,    // 1-2 days
+  THREE_TO_SIX: 0.8,  // 3-6 days
+  SEVEN_PLUS: 0.5,    // 7+ days
+  NO_DEADLINE: 1.0,   // No due date set
+} as const;
+
+export const COMBO_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes (extended for quality grading)
+export const MAX_MULTIPLIER = 1.5; // Reduced from 2.0 - behavior categories are main driver
+export const MULTIPLIER_PER_COMBO = 0.05; // 10 combos = 1.5x max
 
 // -----------------------------------------------------------------------------
 // Initial State
 // -----------------------------------------------------------------------------
+
+export function createInitialCategoryXP(): CategoryXP {
+  return {
+    engagement: 0,
+    specificity: 0,
+    personalization: 0,
+    timeliness: 0,
+    completeness: 0,
+  };
+}
 
 export function createInitialGameState(): GameState {
   return {
@@ -38,6 +83,9 @@ export function createInitialGameState(): GameState {
     sessionStartTime: Date.now(),
     gradedSubmissionIds: [],
     soundEnabled: true,
+    categoryXP: createInitialCategoryXP(),
+    submissionEngagement: {},
+    aiDraftBaselines: {},
   };
 }
 
@@ -64,15 +112,145 @@ export function shouldResetCombo(lastTimestamp: number | null): boolean {
 }
 
 // -----------------------------------------------------------------------------
-// Points Calculation
+// Timeliness Calculation
 // -----------------------------------------------------------------------------
 
+export function calculateTimelinessMultiplier(daysSinceDeadline: number | null): number {
+  // No deadline = neutral multiplier
+  if (daysSinceDeadline === null) {
+    return TIMELINESS_MULTIPLIERS.NO_DEADLINE;
+  }
+
+  if (daysSinceDeadline <= 0) {
+    return TIMELINESS_MULTIPLIERS.SAME_DAY;
+  } else if (daysSinceDeadline <= 2) {
+    return TIMELINESS_MULTIPLIERS.ONE_TO_TWO;
+  } else if (daysSinceDeadline <= 6) {
+    return TIMELINESS_MULTIPLIERS.THREE_TO_SIX;
+  } else {
+    return TIMELINESS_MULTIPLIERS.SEVEN_PLUS;
+  }
+}
+
+export function getDaysSinceDeadline(dueAt: string | null): number | null {
+  if (!dueAt) return null;
+
+  const dueDate = new Date(dueAt);
+  const now = new Date();
+  const diffMs = now.getTime() - dueDate.getTime();
+  const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+
+  return diffDays;
+}
+
+// -----------------------------------------------------------------------------
+// Personalization Calculation
+// -----------------------------------------------------------------------------
+
+export function calculateSimilarity(original: string, current: string): number {
+  if (original === current) return 1;
+  if (!original.length || !current.length) return 0;
+
+  // Space-optimized Levenshtein - O(min(m,n)) space
+  let [str1, str2] = original.length > current.length
+    ? [current, original] : [original, current];
+
+  const len1 = str1.length;
+  const len2 = str2.length;
+
+  let prevRow = Array.from({ length: len1 + 1 }, (_, i) => i);
+  let currRow = new Array(len1 + 1);
+
+  for (let j = 1; j <= len2; j++) {
+    currRow[0] = j;
+    for (let i = 1; i <= len1; i++) {
+      const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      currRow[i] = Math.min(
+        prevRow[i] + 1,
+        currRow[i - 1] + 1,
+        prevRow[i - 1] + cost
+      );
+    }
+    [prevRow, currRow] = [currRow, prevRow];
+  }
+
+  const distance = prevRow[len1];
+  const maxLen = Math.max(original.length, current.length);
+  return 1 - (distance / maxLen);
+}
+
+export function getPersonalizationTier(similarity: number): PersonalizationTier {
+  const diffPercent = (1 - similarity) * 100;
+  if (diffPercent === 0) return 'untouched';
+  if (diffPercent <= 20) return 'reviewed';
+  return 'personalized';
+}
+
+export function calculatePersonalizationTier(
+  originalDraft: string | null,
+  finalText: string
+): PersonalizationTier {
+  if (!originalDraft) return 'untouched'; // No AI draft = no personalization to measure
+  const similarity = calculateSimilarity(originalDraft, finalText);
+  return getPersonalizationTier(similarity);
+}
+
+// -----------------------------------------------------------------------------
+// Category-Based Points Calculation
+// -----------------------------------------------------------------------------
+
+export function calculateCategoryPoints(
+  action: CategoryGradeAction,
+  combo: number
+): CategoryPointsBreakdown {
+  // Calculate base points for each category
+  const engagementPoints = action.engagementMet ? CATEGORY_POINTS.ENGAGEMENT : 0;
+  const specificityPoints = action.specificityTier
+    ? CATEGORY_POINTS.SPECIFICITY[action.specificityTier]
+    : 0;
+  const personalizationPoints = action.personalizationTier
+    ? CATEGORY_POINTS.PERSONALIZATION[action.personalizationTier]
+    : 0;
+
+  // Calculate multipliers
+  const timelinessMultiplier = calculateTimelinessMultiplier(action.daysSinceDeadline);
+  const comboMultiplier = getComboMultiplier(combo);
+
+  // Combo only applies to Engagement and Personalization (per spec)
+  const engagementWithCombo = Math.round(engagementPoints * comboMultiplier);
+  const personalizationWithCombo = Math.round(personalizationPoints * comboMultiplier);
+
+  // Subtotal before timeliness
+  const subtotal = engagementWithCombo + specificityPoints + personalizationWithCombo;
+
+  // Apply timeliness multiplier to entire subtotal
+  const total = Math.round(subtotal * timelinessMultiplier);
+
+  return {
+    engagement: engagementWithCombo,
+    specificity: specificityPoints,
+    personalization: personalizationWithCombo,
+    subtotal,
+    timelinessMultiplier,
+    comboMultiplier,
+    total,
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Legacy Points Calculation (for backward compatibility)
+// -----------------------------------------------------------------------------
+
+/**
+ * Legacy points calculation - retained for backward compatibility
+ * Speed bonuses have been removed in favor of behavior categories
+ */
 export function calculatePoints(
   action: GradeAction,
   combo: number
 ): PointsBreakdown {
   let base = 0;
-  let speedBonus = 0;
+  const speedBonus = 0; // Speed bonuses removed - quality over speed
 
   switch (action.type) {
     case 'grade_competency':
@@ -89,14 +267,7 @@ export function calculatePoints(
       break;
     case 'post_to_canvas':
       base = POINTS.POST_TO_CANVAS;
-      // Add speed bonus based on time spent
-      if (action.timeSpentSeconds !== undefined) {
-        if (action.timeSpentSeconds < 120) {
-          speedBonus = POINTS.SPEED_BONUS_2MIN;
-        } else if (action.timeSpentSeconds < 180) {
-          speedBonus = POINTS.SPEED_BONUS_3MIN;
-        }
-      }
+      // Speed bonuses intentionally removed - use category-based scoring instead
       break;
   }
 
@@ -125,7 +296,12 @@ export type GameAction =
   | { type: 'MARK_GRADED'; submissionId: string }
   | { type: 'TOGGLE_SOUND' }
   | { type: 'RESET_SESSION' }
-  | { type: 'CHECK_IDLE' };
+  | { type: 'CHECK_IDLE' }
+  // New category-based actions
+  | { type: 'ADD_CATEGORY_XP'; category: keyof CategoryXP; points: number }
+  | { type: 'SET_SUBMISSION_ENGAGEMENT'; submissionId: string; scrollPercentage: number; engagementMet: boolean }
+  | { type: 'SET_AI_DRAFT_BASELINE'; submissionId: string; draft: string }
+  | { type: 'AWARD_COMPLETENESS_BONUS' };
 
 export function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
@@ -192,6 +368,48 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
       }
       return state;
 
+    // New category-based actions
+    case 'ADD_CATEGORY_XP':
+      return {
+        ...state,
+        categoryXP: {
+          ...state.categoryXP,
+          [action.category]: state.categoryXP[action.category] + action.points,
+        },
+        sessionXP: state.sessionXP + action.points,
+      };
+
+    case 'SET_SUBMISSION_ENGAGEMENT':
+      return {
+        ...state,
+        submissionEngagement: {
+          ...state.submissionEngagement,
+          [action.submissionId]: {
+            scrollPercentage: action.scrollPercentage,
+            engagementMet: action.engagementMet,
+          },
+        },
+      };
+
+    case 'SET_AI_DRAFT_BASELINE':
+      return {
+        ...state,
+        aiDraftBaselines: {
+          ...state.aiDraftBaselines,
+          [action.submissionId]: action.draft,
+        },
+      };
+
+    case 'AWARD_COMPLETENESS_BONUS':
+      return {
+        ...state,
+        categoryXP: {
+          ...state.categoryXP,
+          completeness: state.categoryXP.completeness + CATEGORY_POINTS.COMPLETENESS_BONUS,
+        },
+        sessionXP: state.sessionXP + CATEGORY_POINTS.COMPLETENESS_BONUS,
+      };
+
     default:
       return state;
   }
@@ -209,10 +427,10 @@ export const ACHIEVEMENTS: Achievement[] = [
     icon: '⚔️',
   },
   {
-    id: 'speed_demon',
-    name: 'Speed Demon',
-    description: 'Average under 2 minutes per submission',
-    icon: '⚡',
+    id: 'quality_champion',
+    name: 'Quality Champion',
+    description: 'Achieve "Personalized" tier on 5 consecutive submissions',
+    icon: '✨',
   },
   {
     id: 'perfectionist',
@@ -256,17 +474,50 @@ export const ACHIEVEMENTS: Achievement[] = [
     description: 'Earn 5000 XP in a single session',
     icon: '👑',
   },
+  // New behavior category achievements
+  {
+    id: 'engaged_reader',
+    name: 'Engaged Reader',
+    description: 'Meet engagement threshold on 10 submissions',
+    icon: '👁️',
+  },
+  {
+    id: 'specific_feedback',
+    name: 'Specific Feedback',
+    description: 'Achieve "High" specificity on 5 submissions',
+    icon: '🎯',
+  },
+  {
+    id: 'batch_master',
+    name: 'Batch Master',
+    description: 'Complete an entire assignment in one session',
+    icon: '🏆',
+  },
+  {
+    id: 'timely_grader',
+    name: 'Timely Grader',
+    description: 'Grade 10 submissions on the same day as deadline',
+    icon: '⏰',
+  },
 ];
+
+export interface SessionStats {
+  totalGraded: number;
+  avgTimeSeconds: number;
+  allCompetenciesScored: boolean;
+  allHaveFeedback: boolean;
+  allPosted: boolean;
+  // New category-based stats
+  personalizedCount?: number;
+  highSpecificityCount?: number;
+  engagementMetCount?: number;
+  sameDayCount?: number;
+  completedAssignment?: boolean;
+}
 
 export function checkAchievements(
   state: GameState,
-  sessionStats: {
-    totalGraded: number;
-    avgTimeSeconds: number;
-    allCompetenciesScored: boolean;
-    allHaveFeedback: boolean;
-    allPosted: boolean;
-  }
+  sessionStats: SessionStats
 ): Achievement[] {
   const unlocked: Achievement[] = [];
 
@@ -274,8 +525,9 @@ export function checkAchievements(
     unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'first_grade')!);
   }
 
-  if (sessionStats.avgTimeSeconds < 120 && sessionStats.totalGraded >= 3) {
-    unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'speed_demon')!);
+  // Quality Champion: 5+ personalized submissions (replaces Speed Demon)
+  if ((sessionStats.personalizedCount ?? 0) >= 5) {
+    unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'quality_champion')!);
   }
 
   if (sessionStats.allCompetenciesScored && sessionStats.totalGraded >= 3) {
@@ -304,6 +556,23 @@ export function checkAchievements(
 
   if (state.sessionXP >= 5000) {
     unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'session_5000')!);
+  }
+
+  // New behavior category achievements
+  if ((sessionStats.engagementMetCount ?? 0) >= 10) {
+    unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'engaged_reader')!);
+  }
+
+  if ((sessionStats.highSpecificityCount ?? 0) >= 5) {
+    unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'specific_feedback')!);
+  }
+
+  if (sessionStats.completedAssignment) {
+    unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'batch_master')!);
+  }
+
+  if ((sessionStats.sameDayCount ?? 0) >= 10) {
+    unlocked.push(ACHIEVEMENTS.find((a) => a.id === 'timely_grader')!);
   }
 
   return unlocked.filter(Boolean);

@@ -413,6 +413,7 @@ export default function Home() {
         assignmentId={selectedAssignment.id}
         assignmentName={selectedAssignment.name}
         assignmentDescription={selectedAssignment.description}
+        dueAt={selectedAssignment.due_at}
         submissions={submissions}
         rubric={rubric}
         onBack={handleBack}

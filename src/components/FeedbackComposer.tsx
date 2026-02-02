@@ -15,6 +15,9 @@ interface FeedbackComposerProps {
   onFeedbackChange: (feedback: FeedbackInput) => void;
   onGenerateAI?: () => void;
   isGenerating?: boolean;
+  // Engagement tracking for scroll-to-unlock
+  engagementMet?: boolean;
+  scrollPercent?: number;
 }
 
 export function FeedbackComposer({
@@ -24,6 +27,8 @@ export function FeedbackComposer({
   onFeedbackChange,
   onGenerateAI,
   isGenerating = false,
+  engagementMet = true, // Default to true for backward compatibility
+  scrollPercent = 100,
 }: FeedbackComposerProps) {
   // Fully controlled component - use parent's state directly
   const textFeedback = currentFeedback.text;
@@ -71,30 +76,67 @@ export function FeedbackComposer({
       {/* Action Buttons */}
       <div className="flex items-center gap-3">
         {onGenerateAI && (
-          <button
-            onClick={onGenerateAI}
-            disabled={isGenerating}
-            className={`
-              flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg
-              font-display text-sm transition-all
-              ${isGenerating
-                ? 'bg-surface text-text-muted cursor-not-allowed'
-                : 'bg-gradient-to-r from-accent-secondary to-accent-primary text-background hover:opacity-90'
-              }
-            `}
-          >
-            {isGenerating ? (
-              <>
-                <span className="animate-spin">⚡</span>
-                <span>GENERATING...</span>
-              </>
-            ) : (
-              <>
-                <span>🤖</span>
-                <span>GENERATE AI FEEDBACK</span>
-              </>
-            )}
-          </button>
+          engagementMet ? (
+            // Engagement met - show enabled AI button
+            <button
+              onClick={onGenerateAI}
+              disabled={isGenerating}
+              className={`
+                flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg
+                font-display text-sm transition-all
+                ${isGenerating
+                  ? 'bg-surface text-text-muted cursor-not-allowed'
+                  : 'bg-gradient-to-r from-accent-secondary to-accent-primary text-background hover:opacity-90'
+                }
+              `}
+            >
+              {isGenerating ? (
+                <>
+                  <span className="animate-spin">⚡</span>
+                  <span>GENERATING...</span>
+                </>
+              ) : (
+                <>
+                  <span>✨</span>
+                  <span>SYNTHESIZE FEEDBACK</span>
+                </>
+              )}
+            </button>
+          ) : (
+            // Engagement not met - show locked state with progress
+            <div className="flex-1 flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-surface/50 border border-surface">
+              <div className="relative">
+                {/* Progress ring */}
+                <svg className="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    className="text-surface"
+                  />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r="15"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeDasharray={`${scrollPercent * 0.94} 100`}
+                    strokeLinecap="round"
+                    className="text-accent-primary transition-all duration-300"
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-xs">🔒</span>
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-display text-text-muted">READ TO UNLOCK</p>
+                <p className="text-xs text-text-muted/60">Scroll through the submission</p>
+              </div>
+            </div>
+          )
         )}
 
         <FeedbackTemplates onSelect={(template) => handleTextChange(template)} />

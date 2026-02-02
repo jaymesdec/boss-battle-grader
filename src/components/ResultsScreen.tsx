@@ -122,10 +122,6 @@ export function ResultsScreen({
     }
   }, [showAchievements, unlockedAchievements.length, fireConfetti]);
 
-  // XP breakdown estimate
-  const xpFromGrades = sessionStats.totalGraded * 50 * 9; // Rough estimate
-  const xpFromBonuses = gameState.sessionXP - xpFromGrades;
-
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-8 animate-victory-reveal">
       <div className="max-w-2xl w-full">
@@ -151,32 +147,58 @@ export function ResultsScreen({
           />
           <StatCard
             icon="⏱️"
-            label="Total Time"
+            label="Session Time"
             value={formatTime(sessionStats.totalTimeSeconds)}
           />
           <StatCard
-            icon="⚡"
-            label="Avg Time"
-            value={formatTime(sessionStats.avgTimeSeconds)}
+            icon="🔥"
+            label="Best Combo"
+            value={`${gameState.streak}x`}
           />
           <StatCard
-            icon="🔥"
-            label="Best Streak"
-            value={`${gameState.streak}x`}
+            icon="✨"
+            label="Quality XP"
+            value={formatXP(
+              gameState.categoryXP.engagement +
+              gameState.categoryXP.specificity +
+              gameState.categoryXP.personalization
+            )}
           />
         </div>
 
-        {/* XP Breakdown */}
+        {/* Category XP Breakdown */}
         <div className="bg-surface/50 rounded-xl p-6 mb-6">
-          <h3 className="font-display text-lg mb-4 text-text-primary">XP BREAKDOWN</h3>
+          <h3 className="font-display text-lg mb-4 text-text-primary">QUALITY BREAKDOWN</h3>
           <div className="space-y-3">
-            <BreakdownRow
-              label="Competency Grades"
-              value={`+${formatXP(Math.max(0, xpFromGrades))}`}
+            <CategoryRow
+              icon="👁️"
+              label="Engagement"
+              description="Reviewed submissions"
+              value={gameState.categoryXP.engagement}
             />
-            <BreakdownRow
-              label="Speed & Combo Bonuses"
-              value={`+${formatXP(Math.max(0, xpFromBonuses))}`}
+            <CategoryRow
+              icon="🎯"
+              label="Specificity"
+              description="Referenced specific details"
+              value={gameState.categoryXP.specificity}
+            />
+            <CategoryRow
+              icon="✍️"
+              label="Personalization"
+              description="Customized feedback"
+              value={gameState.categoryXP.personalization}
+            />
+            <CategoryRow
+              icon="⏰"
+              label="Timeliness"
+              description="Graded promptly"
+              value={gameState.categoryXP.timeliness}
+            />
+            <CategoryRow
+              icon="🏆"
+              label="Completeness"
+              description="Finished assignments"
+              value={gameState.categoryXP.completeness}
             />
             <div className="border-t border-surface pt-3 flex justify-between font-display text-lg">
               <span className="text-text-primary">Total</span>
@@ -242,11 +264,30 @@ function StatCard({ icon, label, value }: { icon: string; label: string; value: 
   );
 }
 
-function BreakdownRow({ label, value }: { label: string; value: string }) {
+function CategoryRow({
+  icon,
+  label,
+  description,
+  value,
+}: {
+  icon: string;
+  label: string;
+  description: string;
+  value: number;
+}) {
+  const hasPoints = value > 0;
   return (
-    <div className="flex justify-between text-sm">
-      <span className="text-text-muted">{label}</span>
-      <span className="text-text-primary font-display">{value}</span>
+    <div className={`flex items-center justify-between py-2 ${hasPoints ? '' : 'opacity-50'}`}>
+      <div className="flex items-center gap-3">
+        <span className="text-xl">{icon}</span>
+        <div>
+          <p className="text-sm text-text-primary font-display">{label}</p>
+          <p className="text-xs text-text-muted">{description}</p>
+        </div>
+      </div>
+      <span className={`font-display ${hasPoints ? 'text-accent-primary' : 'text-text-muted'}`}>
+        {hasPoints ? `+${formatXP(value)}` : '—'}
+      </span>
     </div>
   );
 }
