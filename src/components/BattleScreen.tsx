@@ -531,8 +531,12 @@ export function BattleScreen({
   }, []);
 
   // Post grades to Canvas
-  const handlePostToCanvas = useCallback(async () => {
+  // editedFeedback is passed from review modal to avoid stale state race condition
+  const handlePostToCanvas = useCallback(async (editedFeedback?: string) => {
     if (!currentSubmission) return;
+
+    // Use passed feedback if available, otherwise fall back to state
+    const feedbackText = editedFeedback ?? currentFeedback.text;
 
     // Determine if we're in rubric mode or competency mode
     const hasRubricScores = Object.keys(rubricScores).length > 0 && rubric && rubric.length > 0;
@@ -582,7 +586,7 @@ export function BattleScreen({
           assignmentId,
           userId: currentSubmission.user_id,
           score: Math.round(totalScore),
-          comment: currentFeedback.text,
+          comment: feedbackText,
           rubricAssessment,
         }),
       });
@@ -610,12 +614,12 @@ export function BattleScreen({
           if (s.user_id !== currentSubmission.user_id) return s;
 
           // Create new comment object for the feedback we just posted
-          const newComment = currentFeedback.text.trim()
+          const newComment = feedbackText.trim()
             ? {
                 id: Date.now(), // Temporary ID until Canvas returns real one
                 author_id: 0, // Will be teacher's ID
                 author_name: 'Teacher',
-                comment: currentFeedback.text,
+                comment: feedbackText,
                 created_at: new Date().toISOString(),
               }
             : null;
@@ -640,7 +644,7 @@ export function BattleScreen({
       const aiDraftBaseline = gameState.aiDraftBaselines[String(currentSubmission.id)];
       const personalizationTier = calculatePersonalizationTier(
         aiDraftBaseline || null,
-        currentFeedback.text
+        feedbackText
       );
       const basePersonalizationPoints = CATEGORY_POINTS.PERSONALIZATION[personalizationTier];
       const personalizationPoints = Math.round(basePersonalizationPoints * timelinessMultiplier);
@@ -666,7 +670,7 @@ export function BattleScreen({
       dispatch({ type: 'ADD_XP', points: points.total });
 
       // Award feedback bonus if feedback was added
-      if (currentFeedback.text.trim().length > 0) {
+      if (feedbackText.trim().length > 0) {
         const feedbackPoints = calculatePoints({ type: 'add_feedback' }, gameState.combo);
         dispatch({ type: 'ADD_XP', points: feedbackPoints.total });
       }

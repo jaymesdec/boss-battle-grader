@@ -10,7 +10,7 @@ import type { CanvasRubric, RubricScore } from '@/types';
 interface FeedbackReviewOverlayProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: () => Promise<void>;
+  onSave: (editedFeedback: string) => Promise<void>;
   rubricScores: Record<string, RubricScore>;
   onRubricScoresChange: (scores: Record<string, RubricScore>) => void;
   summaryFeedback: string;
@@ -83,8 +83,8 @@ export function FeedbackReviewOverlay({
       // Update parent state with local changes
       onRubricScoresChange(localScores);
       onSummaryFeedbackChange(localFeedback);
-      // Then trigger save
-      await onSave();
+      // Pass edited feedback directly to avoid stale state race condition
+      await onSave(localFeedback);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save to Canvas');
     }
