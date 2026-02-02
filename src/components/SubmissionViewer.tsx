@@ -119,6 +119,14 @@ export function SubmissionViewer({
     setBatchImageIndex(0);
   }, [batchAttachment]);
 
+  // Batch uploads auto-complete engagement (AI already processed the content)
+  useEffect(() => {
+    if (batchAttachment && maxScrollPercent < 100) {
+      setMaxScrollPercent(100);
+      onScrollProgress?.(100, true);
+    }
+  }, [batchAttachment, maxScrollPercent, onScrollProgress]);
+
   if (isLoading) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8">
@@ -142,15 +150,6 @@ export function SubmissionViewer({
       </div>
     );
   }
-
-  // If there's a batch attachment, show it instead of regular submission
-  // Batch uploads auto-complete engagement (AI already processed the content)
-  useEffect(() => {
-    if (batchAttachment && maxScrollPercent < 100) {
-      setMaxScrollPercent(100);
-      onScrollProgress?.(100, true);
-    }
-  }, [batchAttachment, maxScrollPercent, onScrollProgress]);
 
   if (batchAttachment) {
     return (
