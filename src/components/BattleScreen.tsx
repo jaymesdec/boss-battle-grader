@@ -14,6 +14,7 @@ import { BatchUploadModal } from './BatchUploadModal';
 import { FeedbackComposer } from './FeedbackComposer';
 import { CompetencyScorer } from './CompetencyScorer';
 import { FeedbackReviewOverlay } from './FeedbackReviewOverlay';
+import { SubmissionXPSummary, type XPBreakdown } from './SubmissionXPSummary';
 import {
   createInitialGameState,
   gameReducer,
@@ -21,6 +22,7 @@ import {
   calculatePersonalizationTier,
   getDaysSinceDeadline,
   calculateTimelinessMultiplier,
+  getComboMultiplier,
   POINTS,
   CATEGORY_POINTS,
 } from '@/lib/game';
@@ -121,6 +123,13 @@ export function BattleScreen({
   const [engagementMet, setEngagementMet] = useState(false);
   const [scrollPercent, setScrollPercent] = useState(0);
 
+  // XP summary modal state
+  const [showXPSummary, setShowXPSummary] = useState(false);
+  const [xpBreakdown, setXPBreakdown] = useState<XPBreakdown | null>(null);
+  const [lastSpecificityTier, setLastSpecificityTier] = useState<'low' | 'medium' | 'high' | null>(null);
+  const [pendingNextStudentId, setPendingNextStudentId] = useState<number | null>(null);
+  const [isLastSubmission, setIsLastSubmission] = useState(false);
+
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
   const studentName = currentSubmission?.user?.name || `Student ${currentSubmission?.user_id || 0}`;
@@ -146,6 +155,7 @@ export function BattleScreen({
     setCurrentUserId(userId);
     setParsedContent('');
     setPdfImages([]);
+    setLastSpecificityTier(null); // Reset for new student
 
     // Find the submission for this student
     const submission = submissions.find((s) => s.user_id === userId);
@@ -469,6 +479,8 @@ export function BattleScreen({
           category: 'specificity',
           points: specificityPoints,
         });
+        // Store tier for XP summary display on submission
+        setLastSpecificityTier(result.specificityAnalysis.tier);
       }
 
       // Award timeliness XP as a tracking category (shows in summary)
@@ -629,20 +641,47 @@ export function BattleScreen({
         (s) => s.submitted_at !== null && s.submission_type !== null
       );
       const allGraded = submissionsWithContent.every((s) => newGradedIds.has(s.user_id));
+      let completenessBonus = 0;
 
       if (allGraded && submissionsWithContent.length > 0) {
         // Award completeness bonus for finishing the entire assignment
         dispatch({ type: 'AWARD_COMPLETENESS_BONUS' });
         playSound('success'); // Special sound for completing assignment
+        completenessBonus = CATEGORY_POINTS.COMPLETENESS_BONUS;
       }
 
-      // Move to next ungraded student
+      // Calculate XP breakdown for this submission to show in summary
+      const comboMultiplier = getComboMultiplier(gameState.combo);
+      const engagementPoints = engagementMet ? Math.round(CATEGORY_POINTS.ENGAGEMENT * timelinessMultiplier) : 0;
+      const specificityPoints = lastSpecificityTier
+        ? Math.round(CATEGORY_POINTS.SPECIFICITY[lastSpecificityTier] * timelinessMultiplier)
+        : 0;
+      const baseTotal = engagementPoints + specificityPoints + personalizationPoints;
+      const multipliedTotal = Math.round(baseTotal * comboMultiplier);
+      const finalTotal = multipliedTotal + completenessBonus;
+
+      // Build XP breakdown for summary modal
+      const breakdown: XPBreakdown = {
+        engagement: engagementPoints,
+        specificity: specificityPoints,
+        personalization: personalizationPoints,
+        baseTotal,
+        timelinessMultiplier,
+        comboMultiplier,
+        finalTotal,
+        completenessBonus: completenessBonus > 0 ? completenessBonus : undefined,
+      };
+
+      // Find next ungraded student
       const nextUngraded = submissions.find(
-        (s) => s.user_id !== currentSubmission.user_id && !gradedIds.has(s.user_id)
+        (s) => s.user_id !== currentSubmission.user_id && !newGradedIds.has(s.user_id)
       );
-      if (nextUngraded) {
-        handleSelectStudent(nextUngraded.user_id);
-      }
+
+      // Show XP summary modal instead of immediately transitioning
+      setXPBreakdown(breakdown);
+      setPendingNextStudentId(nextUngraded?.user_id || null);
+      setIsLastSubmission(allGraded);
+      setShowXPSummary(true);
     } catch (error) {
       console.error('Error posting to Canvas:', error);
     } finally {
@@ -662,7 +701,25 @@ export function BattleScreen({
     handleSelectStudent,
     playSound,
     dueAt,
+    engagementMet,
+    lastSpecificityTier,
   ]);
+
+  // Handle XP summary modal dismiss - continue to next student
+  const handleXPSummaryContinue = useCallback(() => {
+    setShowXPSummary(false);
+    setXPBreakdown(null);
+
+    // Reset specificity tier for next submission
+    setLastSpecificityTier(null);
+
+    // Transition to next student or stay on current if none left
+    if (pendingNextStudentId) {
+      handleSelectStudent(pendingNextStudentId);
+      setPendingNextStudentId(null);
+    }
+    setIsLastSubmission(false);
+  }, [pendingNextStudentId, handleSelectStudent]);
 
   // Handle content parsed from submission
   const handleContentParsed = useCallback((content: string) => {
@@ -878,6 +935,16 @@ export function BattleScreen({
         totalPoints={rubric?.reduce((sum, c) => sum + c.points, 0) || 100}
         isSaving={isPosting}
       />
+
+      {/* XP Summary Modal - shows after successful submission */}
+      {showXPSummary && xpBreakdown && (
+        <SubmissionXPSummary
+          studentName={studentName}
+          xpBreakdown={xpBreakdown}
+          onContinue={handleXPSummaryContinue}
+          isLastSubmission={isLastSubmission}
+        />
+      )}
     </div>
   );
 }
