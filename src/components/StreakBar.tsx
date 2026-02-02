@@ -5,6 +5,7 @@
 // =============================================================================
 
 import { useEffect, useState, useRef } from 'react';
+import { signOut } from 'next-auth/react';
 import { getComboMultiplier, getStreakLabel, formatXP, formatTime } from '@/lib/game';
 import type { GameState } from '@/types';
 
@@ -147,6 +148,15 @@ export function StreakBar({
           title={gameState.soundEnabled ? 'Mute sounds' : 'Enable sounds'}
         >
           {gameState.soundEnabled ? '🔊' : '🔇'}
+        </button>
+
+        {/* Sign Out */}
+        <button
+          onClick={() => signOut({ callbackUrl: '/' })}
+          className="p-2 rounded-lg bg-surface/50 hover:bg-accent-danger/20 hover:text-accent-danger transition-colors text-lg pixel-button"
+          title="Sign out"
+        >
+          🚪
         </button>
       </div>
     </div>
