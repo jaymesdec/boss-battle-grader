@@ -342,14 +342,35 @@ export function SubmissionViewer({
   // Gather all content sources
   const contentSources: ContentSource[] = [];
 
-  // Add attachments
+  // Check if this is a URL submission - Canvas auto-generates screenshot PNGs for these
+  const hasUrlSubmission = !!submission.url;
+
+  // Helper to detect auto-generated screenshots (Canvas uses websnappr service)
+  const isAutoScreenshot = (filename: string, contentType: string) => {
+    const lowerName = filename.toLowerCase();
+    // Detect websnappr screenshots or generic screenshot patterns
+    return (
+      lowerName.includes('websnappr') ||
+      lowerName.includes('websnap') ||
+      (hasUrlSubmission && contentType.startsWith('image/') && /^\d+/.test(filename))
+    );
+  };
+
+  // Add attachments (but filter out auto-screenshots when there's a URL submission)
   if (submission.attachments) {
     submission.attachments.forEach((attachment) => {
+      const contentType = attachment.content_type || 'application/octet-stream';
+
+      // Skip auto-generated screenshots when there's a URL submission
+      if (hasUrlSubmission && isAutoScreenshot(attachment.filename, contentType)) {
+        return;
+      }
+
       contentSources.push({
         type: 'file',
         name: attachment.filename,
         url: attachment.url,
-        contentType: attachment.content_type || 'application/octet-stream',
+        contentType,
       });
     });
   }
@@ -363,9 +384,10 @@ export function SubmissionViewer({
     });
   }
 
-  // Add URL if present
+  // Add URL first if present (make it the primary tab)
   if (submission.url) {
-    contentSources.push({
+    // Insert at beginning so URL is the default tab
+    contentSources.unshift({
       type: 'url',
       name: 'Submitted URL',
       url: submission.url,
