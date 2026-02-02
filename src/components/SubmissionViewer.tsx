@@ -7,6 +7,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
+import { SubmissionViewerOverlay } from './SubmissionViewerOverlay';
 import type { CanvasSubmission, BatchAttachment } from '@/types';
 
 // Type for PDF images formatted for Claude's vision API
@@ -31,6 +32,7 @@ export function SubmissionViewer({
   const [parsedContent, setParsedContent] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [batchImageIndex, setBatchImageIndex] = useState(0);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Handle PDF pages loaded - convert to AI format and notify parent
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[]) => {
@@ -82,8 +84,17 @@ export function SubmissionViewer({
               {batchAttachment.pdfImages.length} pages
             </span>
           </div>
-          <div className="text-xs text-text-muted">
-            {batchAttachment.filename}
+          <div className="flex items-center gap-2">
+            <div className="text-xs text-text-muted">
+              {batchAttachment.filename}
+            </div>
+            <button
+              onClick={() => setIsExpanded(true)}
+              className="p-1.5 hover:bg-surface rounded transition-colors"
+              title="Expand to fullscreen"
+            >
+              <span className="text-text-muted text-lg">⤢</span>
+            </button>
           </div>
         </div>
 
@@ -158,6 +169,80 @@ export function SubmissionViewer({
             📸 AI can see all {batchAttachment.pdfImages.length} slides when generating feedback
           </p>
         </div>
+
+        {/* Fullscreen Overlay */}
+        <SubmissionViewerOverlay
+          isOpen={isExpanded}
+          onClose={() => setIsExpanded(false)}
+          title={`BATCH UPLOAD - ${batchAttachment.filename}`}
+        >
+          <div className="h-full flex flex-col">
+            {/* Navigation */}
+            <div className="flex items-center justify-between p-3 border-b border-surface bg-surface/30 shrink-0">
+              <button
+                onClick={() => setBatchImageIndex((i) => Math.max(0, i - 1))}
+                disabled={batchImageIndex === 0}
+                className={`p-2 rounded-lg transition-all ${
+                  batchImageIndex === 0
+                    ? 'text-text-muted cursor-not-allowed'
+                    : 'text-text-primary hover:bg-surface'
+                }`}
+              >
+                ◀
+              </button>
+              <span className="font-display text-sm text-text-primary">
+                SLIDE {batchImageIndex + 1} of {batchAttachment.pdfImages.length}
+              </span>
+              <button
+                onClick={() =>
+                  setBatchImageIndex((i) =>
+                    Math.min(batchAttachment.pdfImages.length - 1, i + 1)
+                  )
+                }
+                disabled={batchImageIndex === batchAttachment.pdfImages.length - 1}
+                className={`p-2 rounded-lg transition-all ${
+                  batchImageIndex === batchAttachment.pdfImages.length - 1
+                    ? 'text-text-muted cursor-not-allowed'
+                    : 'text-text-primary hover:bg-surface'
+                }`}
+              >
+                ▶
+              </button>
+            </div>
+
+            {/* Image Display - larger in fullscreen */}
+            <div className="flex-1 flex items-center justify-center p-6 overflow-auto bg-background/50">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={batchAttachment.pdfImages[batchImageIndex]}
+                alt={`Page ${batchImageIndex + 1}`}
+                className="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+              />
+            </div>
+
+            {/* Thumbnails */}
+            <div className="flex gap-2 p-3 border-t border-surface overflow-x-auto bg-surface/20 shrink-0">
+              {batchAttachment.pdfImages.map((img, i) => (
+                <button
+                  key={i}
+                  onClick={() => setBatchImageIndex(i)}
+                  className={`flex-shrink-0 rounded-lg overflow-hidden transition-all ${
+                    batchImageIndex === i
+                      ? 'ring-2 ring-accent-primary'
+                      : 'opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img}
+                    alt={`Thumbnail ${i + 1}`}
+                    className="h-20 w-auto object-contain bg-white"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        </SubmissionViewerOverlay>
       </div>
     );
   }
@@ -234,8 +319,17 @@ export function SubmissionViewer({
             </span>
           )}
         </div>
-        <div className="text-xs text-text-muted">
-          {formatSubmissionDate(submission.submitted_at)}
+        <div className="flex items-center gap-2">
+          <div className="text-xs text-text-muted">
+            {formatSubmissionDate(submission.submitted_at)}
+          </div>
+          <button
+            onClick={() => setIsExpanded(true)}
+            className="p-1.5 hover:bg-surface rounded transition-colors"
+            title="Expand to fullscreen"
+          >
+            <span className="text-text-muted text-lg">⤢</span>
+          </button>
         </div>
       </div>
 
@@ -285,6 +379,58 @@ export function SubmissionViewer({
           }}
         />
       </div>
+
+      {/* Fullscreen Overlay */}
+      <SubmissionViewerOverlay
+        isOpen={isExpanded}
+        onClose={() => setIsExpanded(false)}
+        title={`Attempt ${submission.attempt}${submission.late ? ' (LATE)' : ''}`}
+      >
+        {/* Tabs for multiple content sources in fullscreen */}
+        {contentSources.length > 1 && (
+          <div className="flex gap-1 p-2 mb-4 border-b border-surface overflow-x-auto">
+            {contentSources.map((source, index) => (
+              <button
+                key={index}
+                onClick={() => setActiveTab(index)}
+                className={`
+                  px-3 py-1.5 text-xs rounded-lg whitespace-nowrap transition-all
+                  ${activeTab === index
+                    ? 'bg-accent-primary/20 text-accent-primary border border-accent-primary'
+                    : 'bg-surface/50 text-text-muted hover:bg-surface border border-transparent'
+                  }
+                `}
+              >
+                {getSourceIcon(source.type)} {source.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Full-size content display */}
+        <ContentDisplay
+          source={activeSource}
+          parsedContent={parsedContent}
+          isParsing={isParsing}
+          onPDFPagesLoaded={handlePDFPagesLoaded}
+          onContentParsed={onContentParsed}
+          onParse={async () => {
+            if (activeSource.type === 'file' && activeSource.url) {
+              setIsParsing(true);
+              try {
+                const content = await parseFileContent(activeSource.url, activeSource.contentType || '');
+                setParsedContent(content);
+                onContentParsed?.(content);
+              } catch (error) {
+                console.error('Failed to parse content:', error);
+                setParsedContent('Failed to parse file content');
+              } finally {
+                setIsParsing(false);
+              }
+            }
+          }}
+        />
+      </SubmissionViewerOverlay>
     </div>
   );
 }
