@@ -101,18 +101,21 @@ export function SubmissionXPSummary({
             icon="👁️"
             label="Engagement"
             value={engagement}
+            hint="Scroll through the full submission"
             dimmed={engagement === 0}
           />
           <XPRow
             icon="🎯"
             label="Specificity"
             value={specificity}
+            hint="Use AI to generate detailed feedback"
             dimmed={specificity === 0}
           />
           <XPRow
             icon="✍️"
             label="Personalization"
             value={personalization}
+            hint="Edit and customize the AI feedback"
             dimmed={personalization === 0}
           />
 
@@ -129,30 +132,40 @@ export function SubmissionXPSummary({
 
           {/* Multipliers */}
           {timelinessMultiplier !== 1.0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-text-muted flex items-center gap-1">
-                <span>⏰</span> Timeliness
-              </span>
-              <span
-                className={
-                  timelinessMultiplier > 1
-                    ? 'text-accent-secondary'
-                    : 'text-accent-danger'
-                }
-              >
-                ×{timelinessMultiplier.toFixed(1)}
-              </span>
+            <div>
+              <div className="flex justify-between text-sm">
+                <span className="text-text-muted flex items-center gap-1">
+                  <span>⏰</span> Timeliness
+                </span>
+                <span
+                  className={
+                    timelinessMultiplier > 1
+                      ? 'text-accent-secondary'
+                      : 'text-accent-danger'
+                  }
+                >
+                  ×{timelinessMultiplier.toFixed(1)}
+                </span>
+              </div>
+              <p className="text-[10px] text-text-muted ml-6 mt-0.5">
+                {timelinessMultiplier > 1 ? 'Graded quickly!' : 'Grade sooner for bonus'}
+              </p>
             </div>
           )}
 
           {comboMultiplier > 1.0 && (
-            <div className="flex justify-between text-sm">
-              <span className="text-text-muted flex items-center gap-1">
-                <span>🔥</span> Combo
-              </span>
-              <span className="text-accent-primary">
-                ×{comboMultiplier.toFixed(2)}
-              </span>
+            <div>
+              <div className="flex justify-between text-sm">
+                <span className="text-text-muted flex items-center gap-1">
+                  <span>🔥</span> Combo
+                </span>
+                <span className="text-accent-primary">
+                  ×{comboMultiplier.toFixed(2)}
+                </span>
+              </div>
+              <p className="text-[10px] text-text-muted ml-6 mt-0.5">
+                Keep grading to build your streak!
+              </p>
             </div>
           )}
 
@@ -210,26 +223,31 @@ function XPRow({
   icon,
   label,
   value,
+  hint,
   dimmed = false,
 }: {
   icon: string;
   label: string;
   value: number;
+  hint?: string;
   dimmed?: boolean;
 }) {
   return (
-    <div
-      className={`flex justify-between items-center ${dimmed ? 'opacity-40' : ''}`}
-    >
-      <span className="flex items-center gap-2 text-sm">
-        <span>{icon}</span>
-        <span className="text-text-primary">{label}</span>
-      </span>
-      <span
-        className={`font-display ${dimmed ? 'text-text-muted' : 'text-accent-primary'}`}
-      >
-        {dimmed ? '—' : `+${formatXP(value)}`}
-      </span>
+    <div className={dimmed ? 'opacity-40' : ''}>
+      <div className="flex justify-between items-center">
+        <span className="flex items-center gap-2 text-sm">
+          <span>{icon}</span>
+          <span className="text-text-primary">{label}</span>
+        </span>
+        <span
+          className={`font-display ${dimmed ? 'text-text-muted' : 'text-accent-primary'}`}
+        >
+          {dimmed ? '—' : `+${formatXP(value)}`}
+        </span>
+      </div>
+      {hint && (
+        <p className="text-[10px] text-text-muted ml-6 mt-0.5">{hint}</p>
+      )}
     </div>
   );
 }
