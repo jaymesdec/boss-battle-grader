@@ -485,7 +485,10 @@ export async function fetchGoogleSlides(presentationId: string): Promise<GoogleS
       slideWarning: failedCount > 0 ? `${failedCount} slide(s) could not be loaded` : undefined,
     };
   } catch (error: unknown) {
-    const err = error as { code?: number; message?: string };
+    const err = error as { code?: number; message?: string; errors?: Array<{ message: string; reason: string }> };
+
+    // Log the full error for debugging
+    console.error('Google Slides API error:', JSON.stringify(err, null, 2));
 
     // Check for API not enabled error
     if (err.code === 403 && err.message?.includes('not been used in project')) {
@@ -495,8 +498,16 @@ export async function fetchGoogleSlides(presentationId: string): Promise<GoogleS
         errorCode: 'API_NOT_ENABLED'
       };
     }
+    // Check for insufficient scopes
+    if (err.code === 403 && err.message?.includes('insufficient')) {
+      return {
+        success: false,
+        error: 'Missing permission for Google Slides. Please sign out and sign back in to grant access.',
+        errorCode: 'ACCESS_DENIED'
+      };
+    }
     if (err.code === 403) {
-      return { success: false, error: 'Access denied to this presentation', errorCode: 'ACCESS_DENIED' };
+      return { success: false, error: `Access denied: ${err.message || 'Check sharing settings'}`, errorCode: 'ACCESS_DENIED' };
     }
     if (err.code === 404) {
       return { success: false, error: 'Presentation not found or has been deleted', errorCode: 'NOT_FOUND' };
