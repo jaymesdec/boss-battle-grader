@@ -222,10 +222,25 @@ export interface FeedbackPair {
   timestamp: string;
 }
 
+export interface TeacherStyleRules {
+  softensCriticism: boolean;
+  addsEncouragement: boolean;
+  prefersShorter: boolean;
+  includesNextSteps: boolean;
+  usesStudentName: boolean;
+  referencesRubric: boolean;
+  toneNotes: string;
+  structureNotes: string;
+}
+
 export interface TeacherPreferences {
-  styleRules: string[];
-  recentExamples: FeedbackPair[];
-  distilledPatterns: string[];
+  styleRules: TeacherStyleRules | null;
+  recentExamples: Array<{
+    original: string;
+    edited: string;
+  }>;
+  pairsAnalyzed: number;
+  lastUpdated: string | null;
 }
 
 // -----------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 
 import type * as ToneType from 'tone';
 
-export type SoundEffect = 'success' | 'click' | 'fail';
+export type SoundEffect = 'success' | 'click' | 'fail' | 'levelUp' | 'unlock' | 'encounter';
 
 // State machine for initialization
 const STATE = {
@@ -17,6 +17,8 @@ const STATE = {
 } as const;
 
 type State = (typeof STATE)[keyof typeof STATE];
+
+const SOUND_PREFERENCE_KEY = 'boss-battle-sound-enabled';
 
 class SoundService {
   private static instance: SoundService | null = null;
@@ -33,7 +35,27 @@ class SoundService {
     return SoundService.instance;
   }
 
-  private constructor() {}
+  private constructor() {
+    // Load saved preference on construction
+    this.enabled = this.loadPreference();
+  }
+
+  /**
+   * Load sound preference from localStorage.
+   */
+  private loadPreference(): boolean {
+    if (typeof window === 'undefined') return true;
+    const stored = localStorage.getItem(SOUND_PREFERENCE_KEY);
+    return stored !== 'false'; // Default to enabled
+  }
+
+  /**
+   * Save sound preference to localStorage.
+   */
+  private savePreference(enabled: boolean): void {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(SOUND_PREFERENCE_KEY, String(enabled));
+  }
 
   /**
    * Initialize the audio context. Must be called from a user gesture (click/tap).
@@ -110,14 +132,42 @@ class SoundService {
         this.synth.triggerAttackRelease('E4', '8n', now);
         this.synth.triggerAttackRelease('C4', '4n', now + 0.15);
         break;
+      case 'levelUp':
+        // Triumphant ascending fanfare - level up celebration
+        this.synth.triggerAttackRelease('C4', '8n', now);
+        this.synth.triggerAttackRelease('E4', '8n', now + 0.1);
+        this.synth.triggerAttackRelease('G4', '8n', now + 0.2);
+        this.synth.triggerAttackRelease('C5', '8n', now + 0.3);
+        this.synth.triggerAttackRelease('E5', '8n', now + 0.4);
+        this.synth.triggerAttackRelease('G5', '4n', now + 0.5);
+        break;
+      case 'unlock':
+        // Single bright tone - feature unlocked
+        this.synth.triggerAttackRelease('E6', '16n', now);
+        this.synth.triggerAttackRelease('G6', '8n', now + 0.05);
+        break;
+      case 'encounter':
+        // Quick dramatic intro - student encounter
+        this.synth.triggerAttackRelease('D4', '16n', now);
+        this.synth.triggerAttackRelease('A4', '16n', now + 0.08);
+        this.synth.triggerAttackRelease('D5', '8n', now + 0.16);
+        break;
     }
   }
 
   /**
-   * Enable or disable sound globally.
+   * Enable or disable sound globally. Persists to localStorage.
    */
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
+    this.savePreference(enabled);
+  }
+
+  /**
+   * Get current enabled state.
+   */
+  isEnabled(): boolean {
+    return this.enabled;
   }
 
   /**

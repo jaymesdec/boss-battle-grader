@@ -4,7 +4,7 @@
 // BattleScreen - Main grading interface combining all panels
 // =============================================================================
 
-import { useState, useReducer, useCallback, useEffect } from 'react';
+import { useState, useReducer, useCallback, useEffect, useRef } from 'react';
 import { StreakBar } from './StreakBar';
 import { StudentQueue } from './StudentQueue';
 import { CharacterCard } from './CharacterCard';
@@ -15,6 +15,10 @@ import { FeedbackComposer } from './FeedbackComposer';
 import { CompetencyScorer } from './CompetencyScorer';
 import { FeedbackReviewOverlay } from './FeedbackReviewOverlay';
 import { SubmissionXPSummary, type XPBreakdown } from './SubmissionXPSummary';
+import { Companion } from './Companion';
+import { EncounterSplash } from './EncounterSplash';
+import { LevelUpCelebration } from './LevelUpCelebration';
+import { useNudgeDetection } from '@/hooks/useNudgeDetection';
 import {
   createInitialGameState,
   gameReducer,
@@ -23,9 +27,11 @@ import {
   getDaysSinceDeadline,
   calculateTimelinessMultiplier,
   getComboMultiplier,
+  checkLevelUp,
   POINTS,
   CATEGORY_POINTS,
 } from '@/lib/game';
+import type { LevelUpInfo } from '@/lib/game';
 import { saveCompetencyScores, loadCompetencyScores } from '@/lib/storage';
 import { useSound } from '@/hooks/useSound';
 import type {
@@ -78,6 +84,17 @@ export function BattleScreen({
 
   // Sound effects
   const { play: playSound } = useSound(gameState.soundEnabled);
+
+  // Anti-pattern nudge detection
+  const {
+    nudge,
+    clearNudge,
+    checkScrollNudge,
+    checkEmptyNotesNudge,
+    checkUnchangedFeedbackNudge,
+    checkRapidFireNudge,
+    resetTracking,
+  } = useNudgeDetection();
 
   // Current selection
   const [currentUserId, setCurrentUserId] = useState<number | null>(
@@ -146,6 +163,15 @@ export function BattleScreen({
   const [pendingNextStudentId, setPendingNextStudentId] = useState<number | null>(null);
   const [isLastSubmission, setIsLastSubmission] = useState(false);
 
+  // Encounter splash state
+  const [showEncounter, setShowEncounter] = useState(false);
+  const [encounterStudent, setEncounterStudent] = useState<{ name: string; avatar: string } | null>(null);
+
+  // Level-up celebration state
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [levelUpInfo, setLevelUpInfo] = useState<LevelUpInfo | null>(null);
+  const previousXPRef = useRef(gameState.sessionXP);
+
   // Get current submission and student
   const currentSubmission = submissions.find((s) => s.user_id === currentUserId) || null;
   const studentName = currentSubmission?.user?.name || `Student ${currentSubmission?.user_id || 0}`;
@@ -166,17 +192,39 @@ export function BattleScreen({
     return () => clearInterval(interval);
   }, []);
 
-  // Handle student selection
-  const handleSelectStudent = useCallback((userId: number) => {
+  // Check for level-up when XP changes
+  useEffect(() => {
+    if (gameState.sessionXP > previousXPRef.current) {
+      const levelUp = checkLevelUp(previousXPRef.current, gameState.sessionXP);
+      if (levelUp) {
+        setLevelUpInfo(levelUp);
+        setShowLevelUp(true);
+      }
+    }
+    previousXPRef.current = gameState.sessionXP;
+  }, [gameState.sessionXP]);
+
+  // Handle student selection with encounter splash
+  const handleSelectStudent = useCallback((userId: number, skipSplash: boolean = false) => {
+    // Find the submission for this student
+    const submission = submissions.find((s) => s.user_id === userId);
+    const studentName = submission?.user?.name || `Student ${userId}`;
+
+    // Show encounter splash for new student (not on initial load or when continuing from XP summary)
+    if (!skipSplash && currentUserId !== null && currentUserId !== userId) {
+      setEncounterStudent({
+        name: studentName,
+        avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(studentName)}&backgroundColor=1a1a2e`,
+      });
+      setShowEncounter(true);
+    }
+
     setCurrentUserId(userId);
     setParsedContent('');
     setPdfImages([]);
     setGoogleDocImages([]);
     setGoogleSlideImages([]);
     setLastSpecificityTier(null); // Reset for new student
-
-    // Find the submission for this student
-    const submission = submissions.find((s) => s.user_id === userId);
 
     // Pre-populate rubric scores from existing Canvas rubric_assessment
     if (submission?.rubric_assessment && rubric) {
@@ -236,7 +284,7 @@ export function BattleScreen({
       setPdfImages(aiImages);
       setParsedContent(`[Batch upload: ${batchAttachment.filename} with ${batchAttachment.pdfImages.length} pages]`);
     }
-  }, [batchAttachments, submissions, rubric]);
+  }, [batchAttachments, submissions, rubric, currentUserId]);
 
   // Handle PDF pages loaded - store for AI vision
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[], aiImages: PDFImageForAI[]) => {
@@ -418,6 +466,16 @@ export function BattleScreen({
   const handleGenerateAllFeedback = useCallback(async () => {
     if (!currentSubmission) return;
 
+    // Check for scroll nudge - warn if user hasn't read submission
+    if (checkScrollNudge(scrollPercent)) {
+      // Show nudge but don't block - user can dismiss and continue
+    }
+
+    // Check for empty notes nudge
+    if (currentFeedback.text) {
+      checkEmptyNotesNudge(currentFeedback.text);
+    }
+
     setIsGeneratingAll(true);
     try {
       const response = await fetch('/api/agent', {
@@ -551,6 +609,9 @@ export function BattleScreen({
     gameState.combo,
     engagementMet,
     dueAt,
+    scrollPercent,
+    checkScrollNudge,
+    checkEmptyNotesNudge,
   ]);
 
   // Open feedback review overlay
@@ -674,6 +735,16 @@ export function BattleScreen({
         aiDraftBaseline || null,
         feedbackText
       );
+
+      // Check for unchanged feedback nudge (AI draft used without edits)
+      if (aiDraftBaseline) {
+        checkUnchangedFeedbackNudge(aiDraftBaseline, feedbackText);
+      }
+
+      // Check for rapid-fire grading nudge
+      const hasNotes = currentFeedback.text.trim().length > 0;
+      const hasAiFeedback = !!aiDraftBaseline;
+      checkRapidFireNudge(hasNotes, hasAiFeedback);
       const basePersonalizationPoints = CATEGORY_POINTS.PERSONALIZATION[personalizationTier];
       const personalizationPoints = Math.round(basePersonalizationPoints * timelinessMultiplier);
       if (personalizationPoints > 0) {
@@ -771,6 +842,8 @@ export function BattleScreen({
     dueAt,
     engagementMet,
     lastSpecificityTier,
+    checkUnchangedFeedbackNudge,
+    checkRapidFireNudge,
   ]);
 
   // Handle XP summary modal dismiss - continue to next student
@@ -1013,6 +1086,40 @@ export function BattleScreen({
           xpBreakdown={xpBreakdown}
           onContinue={handleXPSummaryContinue}
           isLastSubmission={isLastSubmission}
+        />
+      )}
+
+      {/* Companion Character for Anti-Pattern Nudges */}
+      <Companion
+        message={nudge?.message || null}
+        type={nudge?.type || 'info'}
+        onDismiss={clearNudge}
+      />
+
+      {/* Student Encounter Splash */}
+      {showEncounter && encounterStudent && (
+        <EncounterSplash
+          studentName={encounterStudent.name}
+          studentAvatar={encounterStudent.avatar}
+          assignmentName={assignmentName}
+          onComplete={() => {
+            setShowEncounter(false);
+            setEncounterStudent(null);
+          }}
+        />
+      )}
+
+      {/* Level-Up Celebration */}
+      {showLevelUp && levelUpInfo && (
+        <LevelUpCelebration
+          previousLevel={levelUpInfo.previousLevel}
+          newLevel={levelUpInfo.newLevel}
+          newTitle={levelUpInfo.newTitle}
+          onComplete={() => {
+            setShowLevelUp(false);
+            setLevelUpInfo(null);
+          }}
+          soundEnabled={gameState.soundEnabled}
         />
       )}
     </div>

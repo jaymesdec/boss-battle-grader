@@ -57,6 +57,33 @@ export const COMBO_IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes (extended for
 export const MAX_MULTIPLIER = 1.5; // Reduced from 2.0 - behavior categories are main driver
 export const MULTIPLIER_PER_COMBO = 0.05; // 10 combos = 1.5x max
 
+// Level XP thresholds
+export const LEVEL_THRESHOLDS = [
+  0,      // Level 1
+  500,    // Level 2
+  1500,   // Level 3
+  3000,   // Level 4
+  5000,   // Level 5
+  8000,   // Level 6
+  12000,  // Level 7
+  17000,  // Level 8
+  23000,  // Level 9
+  30000,  // Level 10
+] as const;
+
+export const LEVEL_TITLES = [
+  'Apprentice Grader',    // Level 1
+  'Grading Squire',       // Level 2
+  'Feedback Knight',      // Level 3
+  'Quality Guardian',     // Level 4
+  'Assessment Wizard',    // Level 5
+  'Grading Champion',     // Level 6
+  'Evaluation Master',    // Level 7
+  'Feedback Sage',        // Level 8
+  'Grading Legend',       // Level 9
+  'Grand Master Grader',  // Level 10
+] as const;
+
 // -----------------------------------------------------------------------------
 // Initial State
 // -----------------------------------------------------------------------------
@@ -71,6 +98,13 @@ export function createInitialCategoryXP(): CategoryXP {
   };
 }
 
+// Load sound preference from localStorage (client-side only)
+function loadSoundPreference(): boolean {
+  if (typeof window === 'undefined') return true;
+  const stored = localStorage.getItem('boss-battle-sound-enabled');
+  return stored !== 'false';
+}
+
 export function createInitialGameState(): GameState {
   return {
     currentScreen: 'hub',
@@ -82,7 +116,7 @@ export function createInitialGameState(): GameState {
     lastGradeTimestamp: null,
     sessionStartTime: Date.now(),
     gradedSubmissionIds: [],
-    soundEnabled: true,
+    soundEnabled: loadSoundPreference(),
     categoryXP: createInitialCategoryXP(),
     submissionEngagement: {},
     aiDraftBaselines: {},
@@ -109,6 +143,69 @@ export function getStreakLabel(combo: number): StreakLabel {
 export function shouldResetCombo(lastTimestamp: number | null): boolean {
   if (!lastTimestamp) return false;
   return Date.now() - lastTimestamp > COMBO_IDLE_TIMEOUT_MS;
+}
+
+// -----------------------------------------------------------------------------
+// Level Calculation
+// -----------------------------------------------------------------------------
+
+export function calculateLevel(totalXP: number): number {
+  for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
+    if (totalXP >= LEVEL_THRESHOLDS[i]) {
+      return i + 1;
+    }
+  }
+  return 1;
+}
+
+export function getLevelTitle(level: number): string {
+  return LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)] || 'Grader';
+}
+
+export function getXPToNextLevel(totalXP: number): { current: number; required: number; progress: number } {
+  const level = calculateLevel(totalXP);
+
+  if (level >= LEVEL_THRESHOLDS.length) {
+    // Max level reached
+    return {
+      current: totalXP - LEVEL_THRESHOLDS[LEVEL_THRESHOLDS.length - 1],
+      required: 0,
+      progress: 100,
+    };
+  }
+
+  const currentThreshold = LEVEL_THRESHOLDS[level - 1];
+  const nextThreshold = LEVEL_THRESHOLDS[level];
+  const xpIntoLevel = totalXP - currentThreshold;
+  const xpForLevel = nextThreshold - currentThreshold;
+
+  return {
+    current: xpIntoLevel,
+    required: xpForLevel,
+    progress: Math.round((xpIntoLevel / xpForLevel) * 100),
+  };
+}
+
+export interface LevelUpInfo {
+  leveled: boolean;
+  previousLevel: number;
+  newLevel: number;
+  newTitle: string;
+}
+
+export function checkLevelUp(previousXP: number, newXP: number): LevelUpInfo | null {
+  const prevLevel = calculateLevel(previousXP);
+  const newLevel = calculateLevel(newXP);
+
+  if (newLevel > prevLevel) {
+    return {
+      leveled: true,
+      previousLevel: prevLevel,
+      newLevel,
+      newTitle: getLevelTitle(newLevel),
+    };
+  }
+  return null;
 }
 
 // -----------------------------------------------------------------------------

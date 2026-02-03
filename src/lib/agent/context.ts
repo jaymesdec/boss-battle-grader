@@ -2,19 +2,43 @@
 // Agent Context Generator - Builds context.md for the agent
 // =============================================================================
 
-import type { SessionState, CompetencyId, Grade } from '@/types';
+import type { SessionState, CompetencyId, Grade, TeacherStyleRules } from '@/types';
 import { COMPETENCIES } from '@/lib/competencies';
+import { buildStyleInstructions } from '@/lib/feedback-distiller';
 
 // -----------------------------------------------------------------------------
 // Context Template
 // -----------------------------------------------------------------------------
 
-export function generateContext(state?: Partial<SessionState>): string {
-  const safeState = state || {};
+export interface ContextOptions {
+  state?: Partial<SessionState>;
+  styleRules?: TeacherStyleRules | null;
+  recentExamples?: Array<{ original: string; edited: string }>;
+}
+
+export function generateContext(options?: ContextOptions | Partial<SessionState>): string {
+  // Handle both old signature (just state) and new signature (options object)
+  const opts: ContextOptions = options && 'state' in options
+    ? options as ContextOptions
+    : { state: options as Partial<SessionState> };
+
+  const safeState = opts.state || {};
   const gradesFormatted = formatGrades(safeState.grades || {});
   const competencyList = Object.values(COMPETENCIES)
     .map((c) => `${c.emoji} ${c.name}`)
     .join(', ');
+
+  // Build style preferences section if available
+  const styleSection = opts.styleRules
+    ? `\n${buildStyleInstructions(opts.styleRules)}`
+    : '';
+
+  // Build few-shot examples section if available
+  const examplesSection = opts.recentExamples && opts.recentExamples.length > 0
+    ? `\n\n## Recent Feedback Examples (Teacher's Style)\n${opts.recentExamples.slice(0, 3).map((ex, i) =>
+      `### Example ${i + 1}\n**AI Draft:** ${ex.original.slice(0, 200)}...\n**Teacher Edited:** ${ex.edited.slice(0, 200)}...`
+    ).join('\n\n')}`
+    : '';
 
   return `# Boss Battle Grader — Agent Context
 
@@ -25,7 +49,7 @@ student submissions by composing atomic tools in a loop.
 ## What I Know About This Teacher
 - Name: Jaymes Dec
 - Role: Director of Innovation
-- Style: Encouraging but honest feedback
+- Style: Encouraging but honest feedback${styleSection}${examplesSection}
 
 ## Current Session
 - Course: ${safeState.courseName || 'Not selected'}${safeState.courseId ? ` (ID: ${safeState.courseId})` : ''}
@@ -50,7 +74,7 @@ ${competencyList}
 ## Available Tools
 Canvas: fetch_courses, fetch_assignments, fetch_submissions, post_grade, post_comment
 Content: read_submission, parse_file, parse_url
-Feedback: draft_feedback, revise_feedback, save_feedback_pair
+Feedback: draft_feedback, revise_feedback, save_feedback_pair, read_preferences
 Student: read_student_history, score_competency
 State: read_context, complete_task
 

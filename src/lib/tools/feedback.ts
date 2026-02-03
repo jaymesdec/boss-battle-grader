@@ -4,11 +4,12 @@
 
 import { anthropic, MODEL, MAX_TOKENS } from '@/lib/anthropic';
 import { COMPETENCIES, RUBRIC_DESCRIPTORS } from '@/lib/competencies';
-import type { ToolDefinition, FeedbackDraft, FeedbackPair, Grade, CompetencyId } from '@/types';
+import type { ToolDefinition, FeedbackDraft, FeedbackPair, Grade, CompetencyId, TeacherPreferences, TeacherStyleRules } from '@/types';
 import { promises as fs } from 'fs';
 import path from 'path';
 
 const FEEDBACK_PAIRS_PATH = path.join(process.cwd(), 'data', 'feedback-pairs.json');
+const DISTILLED_RULES_PATH = path.join(process.cwd(), 'data', 'teacher-preferences.json');
 
 // -----------------------------------------------------------------------------
 // Tool Definitions
@@ -97,6 +98,15 @@ export const feedbackToolDefinitions: ToolDefinition[] = [
       required: ['assignment_id', 'student_id', 'original_draft', 'teacher_edited'],
     },
   },
+  {
+    name: 'read_preferences',
+    description: 'Reads the teacher\'s learned feedback preferences (distilled from feedback pairs). Returns style rules and recent examples for few-shot injection into draft_feedback.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // -----------------------------------------------------------------------------
@@ -131,6 +141,24 @@ async function loadFeedbackPairs(): Promise<FeedbackPair[]> {
 async function saveFeedbackPairs(pairs: FeedbackPair[]): Promise<void> {
   await fs.mkdir(path.dirname(FEEDBACK_PAIRS_PATH), { recursive: true });
   await fs.writeFile(FEEDBACK_PAIRS_PATH, JSON.stringify(pairs, null, 2));
+}
+
+async function loadDistilledRules(): Promise<TeacherStyleRules | null> {
+  try {
+    const data = await fs.readFile(DISTILLED_RULES_PATH, 'utf-8');
+    const prefs = JSON.parse(data) as { styleRules: TeacherStyleRules; lastUpdated: string };
+    return prefs.styleRules;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveDistilledRules(rules: TeacherStyleRules): Promise<void> {
+  await fs.mkdir(path.dirname(DISTILLED_RULES_PATH), { recursive: true });
+  await fs.writeFile(DISTILLED_RULES_PATH, JSON.stringify({
+    styleRules: rules,
+    lastUpdated: new Date().toISOString(),
+  }, null, 2));
 }
 
 // -----------------------------------------------------------------------------
@@ -326,15 +354,69 @@ export async function executeSaveFeedbackPair(
     const trimmedPairs = pairs.slice(-100);
     await saveFeedbackPairs(trimmedPairs);
 
+    // Trigger distillation every 20 pairs
+    let distillationTriggered = false;
+    if (trimmedPairs.length >= 10 && trimmedPairs.length % 20 === 0) {
+      distillationTriggered = true;
+      // Run distillation in background (don't await)
+      import('@/lib/feedback-distiller').then(({ distillPreferences }) => {
+        distillPreferences(trimmedPairs).then(rules => {
+          if (rules) {
+            saveDistilledRules(rules);
+          }
+        }).catch(err => console.error('Distillation failed:', err));
+      }).catch(err => console.error('Failed to load distiller:', err));
+    }
+
     return JSON.stringify({
       success: true,
       pairId: newPair.id,
       totalPairs: trimmedPairs.length,
+      distillationTriggered,
     });
   } catch (error) {
     return JSON.stringify({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to save feedback pair',
+    });
+  }
+}
+
+export async function executeReadPreferences(): Promise<string> {
+  try {
+    const pairs = await loadFeedbackPairs();
+    const styleRules = await loadDistilledRules();
+
+    // Need at least 5 pairs to provide meaningful examples
+    if (pairs.length < 5) {
+      return JSON.stringify({
+        success: true,
+        preferences: null,
+        reason: `Insufficient feedback pairs (have ${pairs.length}, need 5+)`,
+      });
+    }
+
+    // Get recent examples for few-shot injection (last 5)
+    const recentExamples = pairs.slice(-5).map(pair => ({
+      original: pair.originalDraft.slice(0, 400),
+      edited: pair.teacherEdited.slice(0, 400),
+    }));
+
+    const preferences: TeacherPreferences = {
+      styleRules,
+      recentExamples,
+      pairsAnalyzed: pairs.length,
+      lastUpdated: styleRules ? new Date().toISOString() : null,
+    };
+
+    return JSON.stringify({
+      success: true,
+      preferences,
+    });
+  } catch (error) {
+    return JSON.stringify({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to read preferences',
     });
   }
 }

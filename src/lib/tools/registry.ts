@@ -7,7 +7,7 @@ import type { ToolDefinition, CompetencyId, Grade } from '@/types';
 // Import tool definitions
 import { canvasToolDefinitions, executeFetchCourses, executeFetchAssignments, executeFetchSubmissions, executePostGrade, executePostComment } from './canvas';
 import { contentToolDefinitions, executeReadSubmission, executeParseFile, executeParseUrl } from './content';
-import { feedbackToolDefinitions, executeDraftFeedback, executeReviseFeedback, executeSaveFeedbackPair } from './feedback';
+import { feedbackToolDefinitions, executeDraftFeedback, executeReviseFeedback, executeSaveFeedbackPair, executeReadPreferences } from './feedback';
 import { studentToolDefinitions, executeReadStudentHistory, executeScoreCompetency } from './student';
 
 // -----------------------------------------------------------------------------
@@ -162,6 +162,10 @@ export async function executeTool(
           input.teacher_edited as string,
           input.competency_grades as string | undefined
         );
+        break;
+
+      case 'read_preferences':
+        output = await executeReadPreferences();
         break;
 
       // Student tools
