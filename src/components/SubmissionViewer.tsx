@@ -8,6 +8,8 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import { PDFViewer, getPDFImagesForAI, type PDFPage } from './PDFViewer';
 import { SubmissionViewerOverlay } from './SubmissionViewerOverlay';
+import { ImageSelectionCheckbox } from './ImageSelectionCheckbox';
+import { ImageSelectionControls } from './ImageSelectionControls';
 import type { CanvasSubmission, BatchAttachment, GoogleDocImage, GoogleSlideImage } from '@/types';
 
 // Type for PDF images formatted for Claude's vision API
@@ -26,6 +28,21 @@ interface SubmissionViewerProps {
   batchAttachment?: BatchAttachment | null;
   // Engagement tracking callback
   onScrollProgress?: (scrollPercent: number, engagementMet: boolean) => void;
+  // Image selection props - PDF
+  selectedPdfPageIndices?: Set<number>;
+  onPdfPageSelectionChange?: (pageIndex: number, selected: boolean) => void;
+  onSelectAllPdfPages?: () => void;
+  onDeselectAllPdfPages?: () => void;
+  // Image selection props - Google Docs
+  selectedGoogleDocImageIds?: Set<string>;
+  onGoogleDocImageSelectionChange?: (objectId: string, selected: boolean) => void;
+  onSelectAllGoogleDocImages?: () => void;
+  onDeselectAllGoogleDocImages?: () => void;
+  // Image selection props - Google Slides
+  selectedGoogleSlideIds?: Set<string>;
+  onGoogleSlideSelectionChange?: (slideId: string, selected: boolean) => void;
+  onSelectAllGoogleSlides?: () => void;
+  onDeselectAllGoogleSlides?: () => void;
 }
 
 export function SubmissionViewer({
@@ -37,6 +54,18 @@ export function SubmissionViewer({
   onGoogleSlidesLoaded,
   batchAttachment,
   onScrollProgress,
+  selectedPdfPageIndices,
+  onPdfPageSelectionChange,
+  onSelectAllPdfPages,
+  onDeselectAllPdfPages,
+  selectedGoogleDocImageIds,
+  onGoogleDocImageSelectionChange,
+  onSelectAllGoogleDocImages,
+  onDeselectAllGoogleDocImages,
+  selectedGoogleSlideIds,
+  onGoogleSlideSelectionChange,
+  onSelectAllGoogleSlides,
+  onDeselectAllGoogleSlides,
 }: SubmissionViewerProps) {
   const [activeTab, setActiveTab] = useState(0);
   const [parsedContent, setParsedContent] = useState<string | null>(null);
@@ -471,6 +500,18 @@ export function SubmissionViewer({
           onContentParsed={onContentParsed}
           onGoogleDocImagesLoaded={onGoogleDocImagesLoaded}
           onGoogleSlidesLoaded={onGoogleSlidesLoaded}
+          selectedPdfPageIndices={selectedPdfPageIndices}
+          onPdfPageSelectionChange={onPdfPageSelectionChange}
+          onSelectAllPdfPages={onSelectAllPdfPages}
+          onDeselectAllPdfPages={onDeselectAllPdfPages}
+          selectedGoogleDocImageIds={selectedGoogleDocImageIds}
+          onGoogleDocImageSelectionChange={onGoogleDocImageSelectionChange}
+          onSelectAllGoogleDocImages={onSelectAllGoogleDocImages}
+          onDeselectAllGoogleDocImages={onDeselectAllGoogleDocImages}
+          selectedGoogleSlideIds={selectedGoogleSlideIds}
+          onGoogleSlideSelectionChange={onGoogleSlideSelectionChange}
+          onSelectAllGoogleSlides={onSelectAllGoogleSlides}
+          onDeselectAllGoogleSlides={onDeselectAllGoogleSlides}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -525,6 +566,18 @@ export function SubmissionViewer({
           onContentParsed={onContentParsed}
           onGoogleDocImagesLoaded={onGoogleDocImagesLoaded}
           onGoogleSlidesLoaded={onGoogleSlidesLoaded}
+          selectedPdfPageIndices={selectedPdfPageIndices}
+          onPdfPageSelectionChange={onPdfPageSelectionChange}
+          onSelectAllPdfPages={onSelectAllPdfPages}
+          onDeselectAllPdfPages={onDeselectAllPdfPages}
+          selectedGoogleDocImageIds={selectedGoogleDocImageIds}
+          onGoogleDocImageSelectionChange={onGoogleDocImageSelectionChange}
+          onSelectAllGoogleDocImages={onSelectAllGoogleDocImages}
+          onDeselectAllGoogleDocImages={onDeselectAllGoogleDocImages}
+          selectedGoogleSlideIds={selectedGoogleSlideIds}
+          onGoogleSlideSelectionChange={onGoogleSlideSelectionChange}
+          onSelectAllGoogleSlides={onSelectAllGoogleSlides}
+          onDeselectAllGoogleSlides={onDeselectAllGoogleSlides}
           onParse={async () => {
             if (activeSource.type === 'file' && activeSource.url) {
               setIsParsing(true);
@@ -584,6 +637,18 @@ function ContentDisplay({
   onContentParsed,
   onGoogleDocImagesLoaded,
   onGoogleSlidesLoaded,
+  selectedPdfPageIndices,
+  onPdfPageSelectionChange,
+  onSelectAllPdfPages,
+  onDeselectAllPdfPages,
+  selectedGoogleDocImageIds,
+  onGoogleDocImageSelectionChange,
+  onSelectAllGoogleDocImages,
+  onDeselectAllGoogleDocImages,
+  selectedGoogleSlideIds,
+  onGoogleSlideSelectionChange,
+  onSelectAllGoogleSlides,
+  onDeselectAllGoogleSlides,
 }: {
   source: ContentSource;
   parsedContent: string | null;
@@ -593,6 +658,18 @@ function ContentDisplay({
   onContentParsed?: (content: string) => void;
   onGoogleDocImagesLoaded?: (images: GoogleDocImage[]) => void;
   onGoogleSlidesLoaded?: (slides: GoogleSlideImage[]) => void;
+  selectedPdfPageIndices?: Set<number>;
+  onPdfPageSelectionChange?: (pageIndex: number, selected: boolean) => void;
+  onSelectAllPdfPages?: () => void;
+  onDeselectAllPdfPages?: () => void;
+  selectedGoogleDocImageIds?: Set<string>;
+  onGoogleDocImageSelectionChange?: (objectId: string, selected: boolean) => void;
+  onSelectAllGoogleDocImages?: () => void;
+  onDeselectAllGoogleDocImages?: () => void;
+  selectedGoogleSlideIds?: Set<string>;
+  onGoogleSlideSelectionChange?: (slideId: string, selected: boolean) => void;
+  onSelectAllGoogleSlides?: () => void;
+  onDeselectAllGoogleSlides?: () => void;
 }) {
   if (source.type === 'text') {
     return (
@@ -613,11 +690,31 @@ function ContentDisplay({
     const isGoogleSlides = source.url.includes('docs.google.com/presentation');
 
     if (isGoogleSlides) {
-      return <GoogleSlidesViewer url={source.url} onContentParsed={onContentParsed} onSlidesLoaded={onGoogleSlidesLoaded} />;
+      return (
+        <GoogleSlidesViewer
+          url={source.url}
+          onContentParsed={onContentParsed}
+          onSlidesLoaded={onGoogleSlidesLoaded}
+          selectedSlideIds={selectedGoogleSlideIds}
+          onSlideSelectionChange={onGoogleSlideSelectionChange}
+          onSelectAll={onSelectAllGoogleSlides}
+          onDeselectAll={onDeselectAllGoogleSlides}
+        />
+      );
     }
 
     if (isGoogleDoc) {
-      return <GoogleDocViewer url={source.url} onContentParsed={onContentParsed} onImagesLoaded={onGoogleDocImagesLoaded} />;
+      return (
+        <GoogleDocViewer
+          url={source.url}
+          onContentParsed={onContentParsed}
+          onImagesLoaded={onGoogleDocImagesLoaded}
+          selectedImageIds={selectedGoogleDocImageIds}
+          onImageSelectionChange={onGoogleDocImageSelectionChange}
+          onSelectAll={onSelectAllGoogleDocImages}
+          onDeselectAll={onDeselectAllGoogleDocImages}
+        />
+      );
     }
 
     return (
@@ -670,12 +767,11 @@ function ContentDisplay({
           url={source.url}
           onPagesLoaded={onPDFPagesLoaded}
           onError={(err) => console.error('PDF load error:', err)}
+          selectedPageIndices={selectedPdfPageIndices}
+          onPageSelectionChange={onPdfPageSelectionChange}
+          onSelectAll={onSelectAllPdfPages}
+          onDeselectAll={onDeselectAllPdfPages}
         />
-        <div className="mt-2 p-2 bg-surface/30 rounded-lg">
-          <p className="text-xs text-text-muted text-center">
-            📸 AI can see all slides when generating feedback
-          </p>
-        </div>
       </div>
     );
   }
@@ -1052,10 +1148,18 @@ function GoogleDocViewer({
   url,
   onContentParsed,
   onImagesLoaded,
+  selectedImageIds,
+  onImageSelectionChange,
+  onSelectAll,
+  onDeselectAll,
 }: {
   url: string;
   onContentParsed?: (content: string) => void;
   onImagesLoaded?: (images: GoogleDocImage[]) => void;
+  selectedImageIds?: Set<string>;
+  onImageSelectionChange?: (objectId: string, selected: boolean) => void;
+  onSelectAll?: () => void;
+  onDeselectAll?: () => void;
 }) {
   const { status: sessionStatus } = useSession();
   const [state, setState] = useState<GoogleDocState>({ status: 'loading' });
@@ -1233,15 +1337,16 @@ function GoogleDocViewer({
       {/* Image Gallery */}
       {hasImages && (
         <div className="space-y-3">
-          {/* AI indicator */}
-          <div className="flex items-center gap-2 text-sm text-text-muted">
-            <span>
-              {state.images!.length} image{state.images!.length !== 1 ? 's' : ''} detected
-            </span>
-            <span className="text-xs bg-surface px-2 py-0.5 rounded">
-              AI can see {aiImageCount} image{aiImageCount !== 1 ? 's' : ''}
-            </span>
-          </div>
+          {/* Selection controls */}
+          {selectedImageIds && onSelectAll && onDeselectAll && (
+            <ImageSelectionControls
+              selectedCount={selectedImageIds.size}
+              totalCount={state.images!.length}
+              onSelectAll={onSelectAll}
+              onDeselectAll={onDeselectAll}
+              label="images"
+            />
+          )}
 
           {/* Warning if some failed */}
           {state.imageWarning && (
@@ -1250,17 +1355,29 @@ function GoogleDocViewer({
             </div>
           )}
 
-          {/* Inline images */}
+          {/* Inline images with selection checkboxes */}
           <div className="flex flex-wrap gap-2">
-            {state.images!.map((image, index) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={image.objectId}
-                src={`data:${image.mimeType};base64,${image.base64Data}`}
-                alt={image.altText || `Image ${index + 1}`}
-                className="max-w-full max-h-64 rounded border border-surface object-contain"
-              />
-            ))}
+            {state.images!.map((image, index) => {
+              const isSelected = selectedImageIds?.has(image.objectId) ?? true;
+              return (
+                <div key={image.objectId} className="relative">
+                  {selectedImageIds && onImageSelectionChange && (
+                    <ImageSelectionCheckbox
+                      checked={isSelected}
+                      onChange={(checked) => onImageSelectionChange(image.objectId, checked)}
+                    />
+                  )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`data:${image.mimeType};base64,${image.base64Data}`}
+                    alt={image.altText || `Image ${index + 1}`}
+                    className={`max-w-full max-h-64 rounded border border-surface object-contain transition-opacity ${
+                      isSelected ? '' : 'opacity-50'
+                    }`}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1275,7 +1392,7 @@ function GoogleDocViewer({
       <div className="p-2 bg-surface/30 rounded-lg">
         <p className="text-xs text-text-muted text-center">
           {hasImages
-            ? `📸 AI can see ${aiImageCount} image${aiImageCount !== 1 ? 's' : ''} + text when generating feedback`
+            ? `📸 AI will see ${selectedImageIds?.size ?? aiImageCount} of ${state.images!.length} image${state.images!.length !== 1 ? 's' : ''} + text when generating feedback`
             : '📄 AI can see the full document when generating feedback'
           }
         </p>
@@ -1329,10 +1446,18 @@ function GoogleSlidesViewer({
   url,
   onContentParsed,
   onSlidesLoaded,
+  selectedSlideIds,
+  onSlideSelectionChange,
+  onSelectAll,
+  onDeselectAll,
 }: {
   url: string;
   onContentParsed?: (content: string) => void;
   onSlidesLoaded?: (slides: GoogleSlideImage[]) => void;
+  selectedSlideIds?: Set<string>;
+  onSlideSelectionChange?: (slideId: string, selected: boolean) => void;
+  onSelectAll?: () => void;
+  onDeselectAll?: () => void;
 }) {
   const { status: sessionStatus } = useSession();
   const [state, setState] = useState<GoogleSlidesState>({ status: 'loading' });
@@ -1531,6 +1656,17 @@ function GoogleSlidesViewer({
       {/* Slide Display */}
       {hasSlides && (
         <div className="space-y-3">
+          {/* Selection controls */}
+          {selectedSlideIds && onSelectAll && onDeselectAll && (
+            <ImageSelectionControls
+              selectedCount={selectedSlideIds.size}
+              totalCount={state.slides!.length}
+              onSelectAll={onSelectAll}
+              onDeselectAll={onDeselectAll}
+              label="slides"
+            />
+          )}
+
           {/* Navigation */}
           <div className="flex items-center justify-between p-2 bg-surface/30 rounded-lg">
             <button
@@ -1585,26 +1721,38 @@ function GoogleSlidesViewer({
             </div>
           )}
 
-          {/* Thumbnails */}
+          {/* Thumbnails with selection checkboxes */}
           <div className="flex gap-2 p-2 overflow-x-auto bg-surface/20 rounded-lg">
-            {state.slides!.map((slide, i) => (
-              <button
-                key={slide.slideId}
-                onClick={() => setCurrentSlide(i)}
-                className={`flex-shrink-0 rounded-lg overflow-hidden transition-all ${
-                  currentSlide === i
-                    ? 'ring-2 ring-accent-primary'
-                    : 'opacity-60 hover:opacity-100'
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`data:${slide.mimeType};base64,${slide.base64Data}`}
-                  alt={slide.slideTitle || `Thumbnail ${i + 1}`}
-                  className="h-16 w-auto object-contain bg-white"
-                />
-              </button>
-            ))}
+            {state.slides!.map((slide, i) => {
+              const isSelected = selectedSlideIds?.has(slide.slideId) ?? true;
+              return (
+                <div key={slide.slideId} className="relative flex-shrink-0">
+                  {selectedSlideIds && onSlideSelectionChange && (
+                    <ImageSelectionCheckbox
+                      checked={isSelected}
+                      onChange={(checked) => onSlideSelectionChange(slide.slideId, checked)}
+                    />
+                  )}
+                  <button
+                    onClick={() => setCurrentSlide(i)}
+                    className={`rounded-lg overflow-hidden transition-all ${
+                      currentSlide === i
+                        ? 'ring-2 ring-accent-primary'
+                        : isSelected
+                          ? 'opacity-80 hover:opacity-100'
+                          : 'opacity-40 hover:opacity-60'
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`data:${slide.mimeType};base64,${slide.base64Data}`}
+                      alt={slide.slideTitle || `Thumbnail ${i + 1}`}
+                      className="h-16 w-auto object-contain bg-white"
+                    />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1620,7 +1768,7 @@ function GoogleSlidesViewer({
       <div className="p-2 bg-surface/30 rounded-lg">
         <p className="text-xs text-text-muted text-center">
           {hasSlides
-            ? `📊 AI can see ${aiSlideCount} slide${aiSlideCount !== 1 ? 's' : ''} + notes when generating feedback`
+            ? `📊 AI will see ${selectedSlideIds?.size ?? aiSlideCount} of ${state.slides!.length} slide${state.slides!.length !== 1 ? 's' : ''} + notes when generating feedback`
             : '📊 Empty presentation'
           }
         </p>

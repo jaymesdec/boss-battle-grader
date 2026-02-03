@@ -133,6 +133,11 @@ export function BattleScreen({
   // Google Slides images for AI vision analysis
   const [googleSlideImages, setGoogleSlideImages] = useState<GoogleSlideImage[]>([]);
 
+  // Image selection state for AI (which images to include in feedback generation)
+  const [selectedPdfPageIndices, setSelectedPdfPageIndices] = useState<Set<number>>(new Set());
+  const [selectedGoogleDocImageIds, setSelectedGoogleDocImageIds] = useState<Set<string>>(new Set());
+  const [selectedGoogleSlideIds, setSelectedGoogleSlideIds] = useState<Set<string>>(new Set());
+
   // Batch upload state
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [batchAttachments, setBatchAttachments] = useState<Map<number, BatchAttachment>>(new Map());
@@ -224,6 +229,10 @@ export function BattleScreen({
     setPdfImages([]);
     setGoogleDocImages([]);
     setGoogleSlideImages([]);
+    // Reset image selection state for new student
+    setSelectedPdfPageIndices(new Set());
+    setSelectedGoogleDocImageIds(new Set());
+    setSelectedGoogleSlideIds(new Set());
     setLastSpecificityTier(null); // Reset for new student
 
     // Pre-populate rubric scores from existing Canvas rubric_assessment
@@ -289,6 +298,8 @@ export function BattleScreen({
   // Handle PDF pages loaded - store for AI vision
   const handlePDFPagesLoaded = useCallback((pages: PDFPage[], aiImages: PDFImageForAI[]) => {
     setPdfImages(aiImages);
+    // Initialize all pages as selected
+    setSelectedPdfPageIndices(new Set(pages.map((_, idx) => idx)));
     // Create a text summary of the PDF for text-based context
     const pagesSummary = `[PDF with ${pages.length} slides loaded for AI vision analysis]`;
     setParsedContent(pagesSummary);
@@ -297,11 +308,15 @@ export function BattleScreen({
   // Handle Google Doc images loaded - store for AI vision
   const handleGoogleDocImagesLoaded = useCallback((images: GoogleDocImage[]) => {
     setGoogleDocImages(images);
+    // Initialize all images as selected
+    setSelectedGoogleDocImageIds(new Set(images.map(img => img.objectId)));
   }, []);
 
   // Handle Google Slides images loaded - store for AI vision
   const handleGoogleSlidesLoaded = useCallback((images: GoogleSlideImage[]) => {
     setGoogleSlideImages(images);
+    // Initialize all slides as selected
+    setSelectedGoogleSlideIds(new Set(images.map(slide => slide.slideId)));
   }, []);
 
   // Handle batch attachments received from modal
@@ -327,6 +342,68 @@ export function BattleScreen({
 
   // Get current batch attachment if available
   const currentBatchAttachment = currentUserId ? batchAttachments.get(currentUserId) : null;
+
+  // Image selection handlers
+  const handlePdfPageSelectionChange = useCallback((pageIndex: number, selected: boolean) => {
+    setSelectedPdfPageIndices(prev => {
+      const next = new Set(prev);
+      if (selected) {
+        next.add(pageIndex);
+      } else {
+        next.delete(pageIndex);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleGoogleDocImageSelectionChange = useCallback((objectId: string, selected: boolean) => {
+    setSelectedGoogleDocImageIds(prev => {
+      const next = new Set(prev);
+      if (selected) {
+        next.add(objectId);
+      } else {
+        next.delete(objectId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleGoogleSlideSelectionChange = useCallback((slideId: string, selected: boolean) => {
+    setSelectedGoogleSlideIds(prev => {
+      const next = new Set(prev);
+      if (selected) {
+        next.add(slideId);
+      } else {
+        next.delete(slideId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Bulk selection handlers
+  const handleSelectAllPdfPages = useCallback(() => {
+    setSelectedPdfPageIndices(new Set(pdfImages.map((_, idx) => idx)));
+  }, [pdfImages]);
+
+  const handleDeselectAllPdfPages = useCallback(() => {
+    setSelectedPdfPageIndices(new Set());
+  }, []);
+
+  const handleSelectAllGoogleDocImages = useCallback(() => {
+    setSelectedGoogleDocImageIds(new Set(googleDocImages.map(img => img.objectId)));
+  }, [googleDocImages]);
+
+  const handleDeselectAllGoogleDocImages = useCallback(() => {
+    setSelectedGoogleDocImageIds(new Set());
+  }, []);
+
+  const handleSelectAllGoogleSlides = useCallback(() => {
+    setSelectedGoogleSlideIds(new Set(googleSlideImages.map(slide => slide.slideId)));
+  }, [googleSlideImages]);
+
+  const handleDeselectAllGoogleSlides = useCallback(() => {
+    setSelectedGoogleSlideIds(new Set());
+  }, []);
 
   // Handle grade change
   const handleGradeChange = useCallback((competencyId: CompetencyId, grade: Grade | null) => {
@@ -425,6 +502,11 @@ export function BattleScreen({
   const handleGenerateAI = useCallback(async () => {
     if (Object.keys(currentGrades).length === 0) return;
 
+    // Filter images to only selected ones
+    const selectedPdfImagesForAI = pdfImages.filter((_, idx) => selectedPdfPageIndices.has(idx));
+    const selectedDocImagesForAI = googleDocImages.filter(img => selectedGoogleDocImageIds.has(img.objectId));
+    const selectedSlideImagesForAI = googleSlideImages.filter(slide => selectedGoogleSlideIds.has(slide.slideId));
+
     setIsGeneratingFeedback(true);
     try {
       const response = await fetch('/api/agent', {
@@ -435,12 +517,12 @@ export function BattleScreen({
           studentName: currentStudent?.displayName || 'Student',
           grades: currentGrades,
           submissionContent: parsedContent || currentSubmission?.body || '',
-          // Include PDF images for vision analysis if available
-          pdfImages: pdfImages.length > 0 ? pdfImages : undefined,
-          // Include Google Doc images for vision analysis if available
-          googleDocImages: googleDocImages.length > 0 ? googleDocImages : undefined,
-          // Include Google Slides images for vision analysis if available
-          googleSlideImages: googleSlideImages.length > 0 ? googleSlideImages : undefined,
+          // Include only selected PDF images for vision analysis
+          pdfImages: selectedPdfImagesForAI.length > 0 ? selectedPdfImagesForAI : undefined,
+          // Include only selected Google Doc images for vision analysis
+          googleDocImages: selectedDocImagesForAI.length > 0 ? selectedDocImagesForAI : undefined,
+          // Include only selected Google Slides images for vision analysis
+          googleSlideImages: selectedSlideImagesForAI.length > 0 ? selectedSlideImagesForAI : undefined,
         }),
       });
 
@@ -460,7 +542,7 @@ export function BattleScreen({
     } finally {
       setIsGeneratingFeedback(false);
     }
-  }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo, pdfImages, googleDocImages, googleSlideImages]);
+  }, [currentGrades, currentStudent, parsedContent, currentSubmission, gameState.combo, pdfImages, googleDocImages, googleSlideImages, selectedPdfPageIndices, selectedGoogleDocImageIds, selectedGoogleSlideIds]);
 
   // Generate ALL feedback at once (rubric scores, competency scores, and summary)
   const handleGenerateAllFeedback = useCallback(async () => {
@@ -476,6 +558,11 @@ export function BattleScreen({
       checkEmptyNotesNudge(currentFeedback.text);
     }
 
+    // Filter images to only selected ones
+    const selectedPdfImagesForAI = pdfImages.filter((_, idx) => selectedPdfPageIndices.has(idx));
+    const selectedDocImagesForAI = googleDocImages.filter(img => selectedGoogleDocImageIds.has(img.objectId));
+    const selectedSlideImagesForAI = googleSlideImages.filter(slide => selectedGoogleSlideIds.has(slide.slideId));
+
     setIsGeneratingAll(true);
     try {
       const response = await fetch('/api/agent', {
@@ -485,9 +572,9 @@ export function BattleScreen({
           task: 'generate_all_feedback',
           studentName: currentStudent?.displayName || 'Student',
           submissionContent: parsedContent || currentSubmission?.body || '',
-          pdfImages: pdfImages.length > 0 ? pdfImages : undefined,
-          googleDocImages: googleDocImages.length > 0 ? googleDocImages : undefined,
-          googleSlideImages: googleSlideImages.length > 0 ? googleSlideImages : undefined,
+          pdfImages: selectedPdfImagesForAI.length > 0 ? selectedPdfImagesForAI : undefined,
+          googleDocImages: selectedDocImagesForAI.length > 0 ? selectedDocImagesForAI : undefined,
+          googleSlideImages: selectedSlideImagesForAI.length > 0 ? selectedSlideImagesForAI : undefined,
           rubric: rubric,
           assignmentDescription: assignmentDescription,
           teacherNotes: currentFeedback.text, // Use current feedback text as teacher notes
@@ -602,6 +689,9 @@ export function BattleScreen({
     pdfImages,
     googleDocImages,
     googleSlideImages,
+    selectedPdfPageIndices,
+    selectedGoogleDocImageIds,
+    selectedGoogleSlideIds,
     rubric,
     assignmentDescription,
     currentFeedback.text,
@@ -1013,6 +1103,19 @@ export function BattleScreen({
                 onGoogleSlidesLoaded={handleGoogleSlidesLoaded}
                 batchAttachment={currentBatchAttachment}
                 onScrollProgress={handleScrollProgress}
+                // Image selection props
+                selectedPdfPageIndices={selectedPdfPageIndices}
+                onPdfPageSelectionChange={handlePdfPageSelectionChange}
+                onSelectAllPdfPages={handleSelectAllPdfPages}
+                onDeselectAllPdfPages={handleDeselectAllPdfPages}
+                selectedGoogleDocImageIds={selectedGoogleDocImageIds}
+                onGoogleDocImageSelectionChange={handleGoogleDocImageSelectionChange}
+                onSelectAllGoogleDocImages={handleSelectAllGoogleDocImages}
+                onDeselectAllGoogleDocImages={handleDeselectAllGoogleDocImages}
+                selectedGoogleSlideIds={selectedGoogleSlideIds}
+                onGoogleSlideSelectionChange={handleGoogleSlideSelectionChange}
+                onSelectAllGoogleSlides={handleSelectAllGoogleSlides}
+                onDeselectAllGoogleSlides={handleDeselectAllGoogleSlides}
               />
             )}
           </div>

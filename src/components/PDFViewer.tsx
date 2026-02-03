@@ -5,6 +5,8 @@
 // =============================================================================
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { ImageSelectionCheckbox } from './ImageSelectionCheckbox';
+import { ImageSelectionControls } from './ImageSelectionControls';
 
 // Constants for image quality
 const MAX_DIMENSION = 1200;
@@ -38,9 +40,21 @@ interface PDFViewerProps {
   url: string;
   onPagesLoaded?: (pages: PDFPage[]) => void;
   onError?: (error: Error) => void;
+  selectedPageIndices?: Set<number>;
+  onPageSelectionChange?: (pageIndex: number, selected: boolean) => void;
+  onSelectAll?: () => void;
+  onDeselectAll?: () => void;
 }
 
-export function PDFViewer({ url, onPagesLoaded, onError }: PDFViewerProps) {
+export function PDFViewer({
+  url,
+  onPagesLoaded,
+  onError,
+  selectedPageIndices,
+  onPageSelectionChange,
+  onSelectAll,
+  onDeselectAll,
+}: PDFViewerProps) {
   const [pages, setPages] = useState<PDFPage[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -191,6 +205,19 @@ export function PDFViewer({ url, onPagesLoaded, onError }: PDFViewerProps) {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Selection Controls */}
+      {selectedPageIndices && onSelectAll && onDeselectAll && (
+        <div className="p-2 border-b border-surface bg-surface/10">
+          <ImageSelectionControls
+            selectedCount={selectedPageIndices.size}
+            totalCount={totalPages}
+            onSelectAll={onSelectAll}
+            onDeselectAll={onDeselectAll}
+            label="slides"
+          />
+        </div>
+      )}
+
       {/* Navigation Header */}
       <div className="flex items-center justify-between p-2 border-b border-surface bg-surface/30">
         <button
@@ -242,31 +269,51 @@ export function PDFViewer({ url, onPagesLoaded, onError }: PDFViewerProps) {
         />
       </div>
 
-      {/* Thumbnail Strip */}
+      {/* Thumbnail Strip with Selection Checkboxes */}
       <div className="flex gap-2 p-2 border-t border-surface overflow-x-auto bg-surface/20">
-        {pages.map((page, index) => (
-          <button
-            key={page.pageNumber}
-            onClick={() => setCurrentPage(page.pageNumber)}
-            className={`
-              flex-shrink-0 rounded-lg overflow-hidden transition-all
-              ${currentPage === page.pageNumber
-                ? 'ring-2 ring-accent-primary'
-                : 'opacity-60 hover:opacity-100'
-              }
-            `}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={page.imageDataUrl}
-              alt={`Thumbnail ${page.pageNumber}`}
-              className="h-16 w-auto object-contain bg-white"
-            />
-            <span className="block text-[10px] text-center text-text-muted py-0.5">
-              {page.pageNumber}
-            </span>
-          </button>
-        ))}
+        {pages.map((page) => {
+          const pageIndex = page.pageNumber - 1;
+          const isSelected = selectedPageIndices?.has(pageIndex) ?? true;
+          return (
+            <div key={page.pageNumber} className="relative flex-shrink-0">
+              {selectedPageIndices && onPageSelectionChange && (
+                <ImageSelectionCheckbox
+                  checked={isSelected}
+                  onChange={(checked) => onPageSelectionChange(pageIndex, checked)}
+                />
+              )}
+              <button
+                onClick={() => setCurrentPage(page.pageNumber)}
+                className={`
+                  rounded-lg overflow-hidden transition-all
+                  ${currentPage === page.pageNumber
+                    ? 'ring-2 ring-accent-primary'
+                    : isSelected
+                      ? 'opacity-80 hover:opacity-100'
+                      : 'opacity-40 hover:opacity-60'
+                  }
+                `}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={page.imageDataUrl}
+                  alt={`Thumbnail ${page.pageNumber}`}
+                  className="h-16 w-auto object-contain bg-white"
+                />
+                <span className="block text-[10px] text-center text-text-muted py-0.5">
+                  {page.pageNumber}
+                </span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* AI Indicator */}
+      <div className="p-2 bg-surface/30">
+        <p className="text-xs text-text-muted text-center">
+          📸 AI will see {selectedPageIndices?.size ?? totalPages} of {totalPages} slide{totalPages !== 1 ? 's' : ''} when generating feedback
+        </p>
       </div>
 
       {/* Hidden canvas for rendering */}
