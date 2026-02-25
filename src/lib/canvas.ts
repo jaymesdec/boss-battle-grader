@@ -217,12 +217,14 @@ export async function postGrade(
   assignmentId: number,
   userId: number,
   grade: string,
-  rubricAssessment?: Record<string, { points: number; comments?: string }>
+  rubricAssessment?: Record<string, { points: number; comments?: string }>,
+  attempt?: number
 ): Promise<ApiResponse<CanvasSubmission>> {
   try {
     const body: Record<string, unknown> = {
       submission: {
         posted_grade: grade,
+        attempt: attempt,
       },
     };
 
@@ -247,7 +249,8 @@ export async function postComment(
   courseId: number,
   assignmentId: number,
   userId: number,
-  commentText: string
+  commentText: string,
+  attempt?: number
 ): Promise<ApiResponse<CanvasSubmission>> {
   try {
     const submission = await canvasClient.put<CanvasSubmission>(
@@ -255,6 +258,7 @@ export async function postComment(
       {
         comment: {
           text_comment: commentText,
+          attempt: attempt,
         },
       }
     );

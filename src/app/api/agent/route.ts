@@ -44,6 +44,7 @@ interface AgentRequest {
   courseId?: number;
   assignmentId?: number;
   userId?: number;
+  attempt?: number;
   score?: number;
   comment?: string;
   existingCommentId?: number; // For updating existing comments
@@ -399,7 +400,7 @@ Respond with ONLY the JSON object, no other text.`;
 // -----------------------------------------------------------------------------
 
 async function handlePostGrades(body: AgentRequest) {
-  const { courseId, assignmentId, userId, score, comment, rubricAssessment } = body;
+  const { courseId, assignmentId, userId, attempt, score, comment, rubricAssessment } = body;
 
   if (!courseId || !assignmentId || !userId) {
     return NextResponse.json(
@@ -428,43 +429,19 @@ async function handlePostGrades(body: AgentRequest) {
       assignmentId,
       userId,
       String(score || 0),
-      canvasRubricAssessment
+      canvasRubricAssessment,
+      attempt
     );
 
     if (!gradeResult.success) {
       throw new Error(gradeResult.error || 'Failed to post grade');
     }
 
-    // Post comment if provided - delete existing teacher comments first
+    // Post comment if provided
     if (comment && comment.trim().length > 0) {
-      // Fetch current submission to get existing comments
-      try {
-        const submission = await canvasClient.get<{
-          user_id: number;
-          submission_comments?: Array<{ id: number; author_id: number }>;
-        }>(
-          `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`,
-          { 'include[]': 'submission_comments' }
-        );
-
-        // Delete existing teacher comments (comments not from the student)
-        if (submission.submission_comments) {
-          for (const existingComment of submission.submission_comments) {
-            if (existingComment.author_id !== userId) {
-              await deleteComment(courseId, assignmentId, userId, existingComment.id);
-            }
-          }
-        }
-      } catch (deleteError) {
-        console.error('Warning: Failed to delete existing comments:', deleteError);
-        // Continue anyway - not critical
-      }
-
-      // Now post the new comment
-      const commentResult = await postComment(courseId, assignmentId, userId, comment);
+      const commentResult = await postComment(courseId, assignmentId, userId, comment, attempt);
       if (!commentResult.success) {
         console.error('Warning: Failed to post comment:', commentResult.error);
-        // Don't fail the whole operation if comment fails
       }
     }
 

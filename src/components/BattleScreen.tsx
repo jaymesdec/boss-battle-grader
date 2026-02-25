@@ -291,6 +291,8 @@ export function BattleScreen({
         },
       }));
       setPdfImages(aiImages);
+      // Initialize all pages as selected for AI feedback generation
+      setSelectedPdfPageIndices(new Set(batchAttachment.pdfImages.map((_, idx) => idx)));
       setParsedContent(`[Batch upload: ${batchAttachment.filename} with ${batchAttachment.pdfImages.length} pages]`);
     }
   }, [batchAttachments, submissions, rubric, currentUserId]);
@@ -336,6 +338,8 @@ export function BattleScreen({
         },
       }));
       setPdfImages(aiImages);
+      // Initialize all pages as selected for AI feedback generation
+      setSelectedPdfPageIndices(new Set(attachment.pdfImages.map((_, idx) => idx)));
       setParsedContent(`[Batch upload: ${attachment.filename} with ${attachment.pdfImages.length} pages]`);
     }
   }, [currentUserId]);
@@ -764,6 +768,7 @@ export function BattleScreen({
           courseId,
           assignmentId,
           userId: currentSubmission.user_id,
+          attempt: currentSubmission.attempt,
           score: Math.round(totalScore),
           comment: feedbackText,
           rubricAssessment,

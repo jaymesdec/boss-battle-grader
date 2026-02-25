@@ -21,8 +21,8 @@ async function getPdfJs() {
 
   const pdfjs = await import('pdfjs-dist');
 
-  // Configure worker from CDN using legacy build for browser compatibility
-  pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+  // Configure worker from local file (copied from node_modules/pdfjs-dist/build/)
+  pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
   pdfjsLib = pdfjs;
   return pdfjs;

@@ -3,6 +3,20 @@ import { NextResponse } from 'next/server';
 const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL;
 const CANVAS_API_TOKEN = process.env.CANVAS_API_TOKEN;
 
+// Parse Canvas Link header for pagination
+function getNextPageUrl(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+
+  const parts = linkHeader.split(',');
+  for (const part of parts) {
+    const match = part.match(/<([^>]+)>;\s*rel="next"/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ courseId: string }> }
@@ -17,27 +31,34 @@ export async function GET(
   }
 
   try {
-    // Fetch assignments with submission summary and needs_grading_count
-    const response = await fetch(
-      `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments?per_page=50&include[]=submission_summary&include[]=needs_grading_count`,
-      {
+    // Fetch all assignments with pagination
+    const allAssignments: unknown[] = [];
+    let url: string | null = `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments?per_page=100&include[]=submission_summary&include[]=needs_grading_count`;
+
+    while (url) {
+      const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${CANVAS_API_TOKEN}`,
         },
-      }
-    );
+      });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('Canvas API error:', error);
-      return NextResponse.json(
-        { error: 'Failed to fetch assignments from Canvas' },
-        { status: response.status }
-      );
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('Canvas API error:', error);
+        return NextResponse.json(
+          { error: 'Failed to fetch assignments from Canvas' },
+          { status: response.status }
+        );
+      }
+
+      const assignments = await response.json();
+      allAssignments.push(...assignments);
+
+      // Check for next page
+      url = getNextPageUrl(response.headers.get('Link'));
     }
 
-    const assignments = await response.json();
-    return NextResponse.json(assignments);
+    return NextResponse.json(allAssignments);
   } catch (error) {
     console.error('Error fetching assignments:', error);
     return NextResponse.json(
