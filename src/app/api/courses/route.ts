@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
 
-const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL;
+const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL ?? 'https://franklinjc.instructure.com';
 const CANVAS_API_TOKEN = process.env.CANVAS_API_TOKEN;
 
 // Current grading period term ID
 const CURRENT_TERM_ID = 155;
 
 export async function GET() {
-  if (!CANVAS_BASE_URL || !CANVAS_API_TOKEN) {
+  const session = await auth();
+  const accessToken = session?.canvasAccessToken ?? CANVAS_API_TOKEN;
+
+  if (!CANVAS_BASE_URL || !accessToken) {
     return NextResponse.json(
       { error: 'Canvas API not configured' },
       { status: 500 }
@@ -19,8 +23,9 @@ export async function GET() {
       `${CANVAS_BASE_URL}/api/v1/courses?enrollment_type=teacher&per_page=100&include[]=total_students`,
       {
         headers: {
-          Authorization: `Bearer ${CANVAS_API_TOKEN}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        cache: 'no-store',
       }
     );
 

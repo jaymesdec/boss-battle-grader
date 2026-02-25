@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
 
-const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL;
+const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL ?? 'https://franklinjc.instructure.com';
 const CANVAS_API_TOKEN = process.env.CANVAS_API_TOKEN;
 
 export async function GET(
@@ -8,8 +9,10 @@ export async function GET(
   { params }: { params: Promise<{ courseId: string; assignmentId: string }> }
 ) {
   const { courseId, assignmentId } = await params;
+  const session = await auth();
+  const accessToken = session?.canvasAccessToken ?? CANVAS_API_TOKEN;
 
-  if (!CANVAS_BASE_URL || !CANVAS_API_TOKEN) {
+  if (!CANVAS_BASE_URL || !accessToken) {
     return NextResponse.json(
       { error: 'Canvas API not configured' },
       { status: 500 }
@@ -22,8 +25,9 @@ export async function GET(
       `${CANVAS_BASE_URL}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions?per_page=100&include[]=user&include[]=submission_comments&include[]=rubric_assessment`,
       {
         headers: {
-          Authorization: `Bearer ${CANVAS_API_TOKEN}`,
+          Authorization: `Bearer ${accessToken}`,
         },
+        cache: 'no-store',
       }
     );
 
