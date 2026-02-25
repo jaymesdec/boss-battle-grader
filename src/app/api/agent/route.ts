@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runAgentLoop, streamAgentLoop } from '@/lib/agent/loop';
 import { anthropic, MODEL, MAX_TOKENS } from '@/lib/anthropic';
 import { postGrade, postComment, deleteComment, canvasClient } from '@/lib/canvas';
+import { auth } from '@/lib/auth';
 import {
   extractStudentIdentity,
   anonymizeText,
@@ -401,11 +402,20 @@ Respond with ONLY the JSON object, no other text.`;
 
 async function handlePostGrades(body: AgentRequest) {
   const { courseId, assignmentId, userId, attempt, score, comment, rubricAssessment } = body;
+  const session = await auth();
+  const accessToken = session?.canvasAccessToken ?? process.env.CANVAS_API_TOKEN;
 
   if (!courseId || !assignmentId || !userId) {
     return NextResponse.json(
       { success: false, error: 'Missing required fields: courseId, assignmentId, or userId' },
       { status: 400 }
+    );
+  }
+
+  if (!accessToken) {
+    return NextResponse.json(
+      { success: false, error: 'Canvas access token is missing. Please sign in again.' },
+      { status: 401 }
     );
   }
 
@@ -430,7 +440,8 @@ async function handlePostGrades(body: AgentRequest) {
       userId,
       String(score || 0),
       canvasRubricAssessment,
-      attempt
+      attempt,
+      accessToken
     );
 
     if (!gradeResult.success) {
@@ -439,7 +450,7 @@ async function handlePostGrades(body: AgentRequest) {
 
     // Post comment if provided
     if (comment && comment.trim().length > 0) {
-      const commentResult = await postComment(courseId, assignmentId, userId, comment, attempt);
+      const commentResult = await postComment(courseId, assignmentId, userId, comment, attempt, accessToken);
       if (!commentResult.success) {
         console.error('Warning: Failed to post comment:', commentResult.error);
       }

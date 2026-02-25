@@ -59,9 +59,9 @@ class CanvasClient {
   private baseUrl: string;
   private token: string;
 
-  constructor() {
-    this.baseUrl = CANVAS_BASE_URL || '';
-    this.token = CANVAS_API_TOKEN || '';
+  constructor(token?: string, baseUrl?: string) {
+    this.baseUrl = baseUrl || CANVAS_BASE_URL || '';
+    this.token = token || CANVAS_API_TOKEN || '';
   }
 
   private async fetch<T>(
@@ -150,13 +150,18 @@ class CanvasClient {
 
 export const canvasClient = new CanvasClient();
 
+export function createCanvasClient(accessToken?: string): CanvasClient {
+  return new CanvasClient(accessToken);
+}
+
 // -----------------------------------------------------------------------------
 // Canvas API Functions
 // -----------------------------------------------------------------------------
 
-export async function fetchCourses(): Promise<ApiResponse<CanvasCourse[]>> {
+export async function fetchCourses(accessToken?: string): Promise<ApiResponse<CanvasCourse[]>> {
   try {
-    const courses = await canvasClient.fetchAllPages<CanvasCourse>(
+    const client = createCanvasClient(accessToken);
+    const courses = await client.fetchAllPages<CanvasCourse>(
       '/api/v1/courses',
       {
         'include[]': 'total_students,teachers,term',
@@ -174,10 +179,12 @@ export async function fetchCourses(): Promise<ApiResponse<CanvasCourse[]>> {
 }
 
 export async function fetchAssignments(
-  courseId: number
+  courseId: number,
+  accessToken?: string
 ): Promise<ApiResponse<CanvasAssignment[]>> {
   try {
-    const assignments = await canvasClient.fetchAllPages<CanvasAssignment>(
+    const client = createCanvasClient(accessToken);
+    const assignments = await client.fetchAllPages<CanvasAssignment>(
       `/api/v1/courses/${courseId}/assignments`,
       {
         'include[]': 'submission_summary',
@@ -194,10 +201,12 @@ export async function fetchAssignments(
 
 export async function fetchSubmissions(
   courseId: number,
-  assignmentId: number
+  assignmentId: number,
+  accessToken?: string
 ): Promise<ApiResponse<CanvasSubmission[]>> {
   try {
-    const submissions = await canvasClient.fetchAllPages<CanvasSubmission>(
+    const client = createCanvasClient(accessToken);
+    const submissions = await client.fetchAllPages<CanvasSubmission>(
       `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions`,
       {
         'include[]': 'user,submission_comments,rubric_assessment',
@@ -218,9 +227,11 @@ export async function postGrade(
   userId: number,
   grade: string,
   rubricAssessment?: Record<string, { points: number; comments?: string }>,
-  attempt?: number
+  attempt?: number,
+  accessToken?: string
 ): Promise<ApiResponse<CanvasSubmission>> {
   try {
+    const client = createCanvasClient(accessToken);
     const body: Record<string, unknown> = {
       submission: {
         posted_grade: grade,
@@ -232,7 +243,7 @@ export async function postGrade(
       body.rubric_assessment = rubricAssessment;
     }
 
-    const submission = await canvasClient.put<CanvasSubmission>(
+    const submission = await client.put<CanvasSubmission>(
       `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`,
       body
     );
@@ -250,10 +261,12 @@ export async function postComment(
   assignmentId: number,
   userId: number,
   commentText: string,
-  attempt?: number
+  attempt?: number,
+  accessToken?: string
 ): Promise<ApiResponse<CanvasSubmission>> {
   try {
-    const submission = await canvasClient.put<CanvasSubmission>(
+    const client = createCanvasClient(accessToken);
+    const submission = await client.put<CanvasSubmission>(
       `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}`,
       {
         comment: {
@@ -275,10 +288,12 @@ export async function deleteComment(
   courseId: number,
   assignmentId: number,
   userId: number,
-  commentId: number
+  commentId: number,
+  accessToken?: string
 ): Promise<ApiResponse<void>> {
   try {
-    await canvasClient.delete(
+    const client = createCanvasClient(accessToken);
+    await client.delete(
       `/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${userId}/comments/${commentId}`
     );
     return { success: true };
@@ -291,12 +306,13 @@ export async function deleteComment(
 }
 
 export async function fetchSubmissionFiles(
-  fileUrl: string
+  fileUrl: string,
+  accessToken?: string
 ): Promise<ApiResponse<ArrayBuffer>> {
   try {
     const response = await fetch(fileUrl, {
       headers: {
-        Authorization: `Bearer ${CANVAS_API_TOKEN}`,
+        Authorization: `Bearer ${accessToken ?? CANVAS_API_TOKEN}`,
       },
     });
 
